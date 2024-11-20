@@ -28,17 +28,27 @@ def read_info(img_path):
 with open(DATA_CFG['JSON_DIR']) as f:
     all_image_info = json.load(f)
 all_info = []
-for image_path in tqdm(all_image_info):
-    info = read_info(image_path)
-    info['image_path'] = image_path
-    all_info.append(info)
 
+dataset_dir = DATA_CFG['DATASET_DIR']
+
+# Loop through the images and update paths
+for image_path in tqdm(all_image_info):
+    # Update image path to have the correct base directory
+    updated_image_path = image_path.replace('/data/FreiHAND/training/rgb/', dataset_dir)
+    
+    # Read the corresponding JSON file using the updated path
+    info = read_info(updated_image_path)
+    info['image_path'] = updated_image_path
+    all_info.append(info)
 class HandDataset(Dataset):
     def __init__(self, all_info):
         super().__init__()
-
+        
         self.init_aug_funcs()
         self.all_info = all_info
+
+    def check_dataset(self):
+        print(len(self.dataset))
 
     def __len__(self):
         return len(self.all_info)
@@ -160,6 +170,7 @@ class HandDataset(Dataset):
 
 def build_train_loader(batch_size):
 	dataset = HandDataset(all_info)
+    
 	sampler = RandomSampler(dataset, replacement=True)
 	dataloader = (DataLoader(dataset, batch_size=batch_size, sampler=sampler))
 	return iter(dataloader)

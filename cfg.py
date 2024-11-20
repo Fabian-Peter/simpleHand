@@ -38,7 +38,7 @@ _CONFIG = dict(
     ),
     DATA=dict(
         IMAGE_SHAPE=[224, 224, 3],
-        DATASET_DIR='/data/FreiHAND/training/rgb/',
+        DATASET_DIR='/home/fabian/simpleHand/data/FreiHAND/training/rgb/',
         JSON_DIR='dataset/train.json',
         NORMALIZE_3D_GT=False,
         ROOT_INDEX=9,        
@@ -64,7 +64,8 @@ _CONFIG = dict(
     TRAIN=dict(
         DATALOADER=dict(
             MINIBATCH_SIZE_PER_DIVICE=32,
-            MINIBATCH_PER_EPOCH=256,
+            MINIBATCH_PER_EPOCH=128,
+            DROP_LAST=True,
             NAME="train"
         ),
 				
