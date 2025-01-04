@@ -34,7 +34,7 @@ dataset_dir = DATA_CFG['DATASET_DIR']
 # Loop through the images and update paths
 for image_path in tqdm(all_image_info):
     # Update image path to have the correct base directory
-    updated_image_path = image_path.replace('/data/FreiHAND/training/rgb/', dataset_dir)
+    updated_image_path = image_path.replace('/data/myHAND/training/rgb/', dataset_dir)
     
     # Read the corresponding JSON file using the updated path
     info = read_info(updated_image_path)
