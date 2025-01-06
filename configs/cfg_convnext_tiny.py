@@ -116,7 +116,7 @@ _CONFIG = dict(
             ),             
         ],
         IMAGE_SHAPE=(224, 224),
-        BATCH_SIZE=32,
+        BATCH_SIZE=42,
     ),
 
 )
