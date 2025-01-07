@@ -63,8 +63,8 @@ _CONFIG = dict(
     ),
     TRAIN=dict(
         DATALOADER=dict(
-            MINIBATCH_SIZE_PER_DIVICE=4,
-            MINIBATCH_PER_EPOCH=4,
+            MINIBATCH_SIZE_PER_DIVICE=32,
+            MINIBATCH_PER_EPOCH=32,
             DROP_LAST=True,
             NAME="train"
         ),
