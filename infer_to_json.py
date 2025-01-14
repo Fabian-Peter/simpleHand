@@ -17,6 +17,9 @@ from scipy.linalg import orthogonal_procrustes
 import open3d as o3d
 import numpy as np
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 
 class EvalUtil:
     """ Util class for evaluation networks.
@@ -121,6 +124,88 @@ def verts2pcd(verts, color=None):
             pcd.paint_uniform_color([0, 0, 1.0])
     return pcd
 
+
+def make_root_relative(keypoints3d, root_index=0):
+    """
+    Convert absolute 3D coordinates to root-relative coordinates.
+    
+    Args:
+        keypoints3d (np.ndarray): Shape (N, 3) array of 3D keypoint coordinates
+        root_index (int): Index of the root joint (default=0, usually wrist)
+        
+    Returns:
+        np.ndarray: Root-relative 3D coordinates with same shape as input
+    """
+    root_point = keypoints3d[root_index].copy()
+    return keypoints3d - root_point[None, :]
+
+def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
+    """
+    Visualize and compare predicted and ground truth hand coordinates.
+    
+    Args:
+        pred_coords (np.ndarray): Shape (N, 3) array of predicted 3D coordinates
+        gt_coords (np.ndarray): Shape (N, 3) array of ground truth 3D coordinates
+        root_index (int): Index of the root joint for making coordinates root-relative
+    """
+    # Define skeleton connections (example for a 21-joint hand model)
+    skeleton = [
+        (0, 1), (1, 2), (2, 3), (3, 4),    # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),    # Index
+        (0, 9), (9, 10), (10, 11), (11, 12), # Middle
+        (0, 13), (13, 14), (14, 15), (15, 16), # Ring
+        (0, 17), (17, 18), (18, 19), (19, 20)  # Pinky
+    ]
+    
+    # Make ground truth root-relative to match predictions
+    gt_coords_relative = make_root_relative(gt_coords, root_index)
+    
+    # Calculate error statistics
+    error = np.linalg.norm(pred_coords - gt_coords_relative, axis=1)
+    mean_error = np.mean(error)
+    max_error = np.max(error)
+    
+    print(f"Mean joint error: {mean_error:.4f}")
+    print(f"Max joint error: {max_error:.4f}")
+    
+    # Visualization
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot ground truth
+    ax.scatter(gt_coords_relative[:, 0], gt_coords_relative[:, 1], gt_coords_relative[:, 2], c='g', label='Ground Truth', s=50)
+    for start, end in skeleton:
+        ax.plot(
+            [gt_coords_relative[start, 0], gt_coords_relative[end, 0]],
+            [gt_coords_relative[start, 1], gt_coords_relative[end, 1]],
+            [gt_coords_relative[start, 2], gt_coords_relative[end, 2]],
+            c='g', linestyle='-', linewidth=2
+        )
+    
+    # Plot predictions
+    ax.scatter(pred_coords[:, 0], pred_coords[:, 1], pred_coords[:, 2], c='r', label='Predictions', s=50)
+    for start, end in skeleton:
+        ax.plot(
+            [pred_coords[start, 0], pred_coords[end, 0]],
+            [pred_coords[start, 1], pred_coords[end, 1]],
+            [pred_coords[start, 2], pred_coords[end, 2]],
+            c='r', linestyle='--', linewidth=2
+        )
+    
+    # Add annotations for error
+    for i in range(len(gt_coords)):
+        ax.text(
+            gt_coords_relative[i, 0], gt_coords_relative[i, 1], gt_coords_relative[i, 2],
+            f'{error[i]:.2f}', color='blue', fontsize=8
+        )
+    
+    # Customize plot
+    ax.set_title("Hand Prediction vs Ground Truth")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.legend()
+    plt.show()
 
 def calculate_fscore(gt, pr, th=0.01):
     gt = verts2pcd(gt)
@@ -283,6 +368,11 @@ def main(epoch, tta=False, postfix=""):
         xyz, verts = xyz_gt_list[idx], verts_gt_list[idx]
         xyz, verts = [np.array(x) for x in [xyz, verts]]
 
+        gt_xyz = np.array(xyz_gt_list[idx])
+        pred_xyz = np.array(xyz_pred_list[idx])
+
+        visualize_hand_predictions(pred_xyz, gt_xyz)
+
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]
 
@@ -371,11 +461,12 @@ def main(epoch, tta=False, postfix=""):
         f_out.append('f_score_%d: %f' % (round(t*1000), f.mean()))
         f_out.append('f_al_score_%d: %f' % (round(t*1000), fa.mean()))
 
+    os.makedirs(os.path.dirname(result_json_path), exist_ok=True)
 
-    # with os.open(result_json_path, 'w') as f:
-    #     json.dump(dataset.all_info, f)
+    with open(result_json_path, 'w') as f:
+         json.dump(dataset.all_info, f)
             
-    #     print(f"Result save to {result_json_path}")
+    print(f"Result save to {result_json_path}")
         
 
 if __name__ == "__main__":
