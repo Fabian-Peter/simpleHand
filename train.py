@@ -105,7 +105,7 @@ class Trainer:
         if args.rank in [-1, 0]:
             self.writer = SummaryWriter(os.path.join("./train_log", 'train'))            
 
-        model = HandNet(self.cfg)
+        model = HandNet(self.cfg) #
         model.cuda(args.local_rank)
 
         decay = []
@@ -173,6 +173,9 @@ class Trainer:
 
     def before_epoch(self):
         self.train_loader = build_train_loader(self.cfg["TRAIN"]["DATALOADER"]["MINIBATCH_SIZE_PER_DIVICE"])
+        #debug
+        sample_batch = next(self.train_loader)
+        print("batch marker sample: ", sample_batch['markers3d'])
         self.model.train()
 
     def after_epoch(self):

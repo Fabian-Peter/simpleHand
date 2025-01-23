@@ -18,6 +18,7 @@ IMAGE_SHAPE: List = DATA_CFG["IMAGE_SHAPE"][:2]
 NORMALIZE_3D_GT = DATA_CFG['NORMALIZE_3D_GT']
 AUG_CFG: Dict = DATA_CFG["AUG"]
 ROOT_INDEX = DATA_CFG['ROOT_INDEX']
+INDICES = DATA_CFG['INDICES'] # Fingertip indices
 
 def read_info(img_path):
     info_path = img_path.replace('.jpg', '.json')
@@ -46,6 +47,7 @@ class HandDataset(Dataset):
         
         self.init_aug_funcs()
         self.all_info = all_info
+        
 
     def check_dataset(self):
         print(len(self.dataset))
@@ -80,6 +82,9 @@ class HandDataset(Dataset):
         
         vertices = np.array(data_info['vertices']).astype('float32')
 
+    	#marker 3D keypoint extraction
+        markers3d = np.array([data_info['xyz'][i] for i in INDICES], dtype=np.float32)
+        
         h, w = img.shape[:2]
         if img.ndim == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -99,27 +104,27 @@ class HandDataset(Dataset):
         max_coord = points.max(axis=0)
         center = (max_coord + min_coord)/2
         scale = max_coord - min_coord
-                
+        
         results = {
             "img": img,
             "keypoints2d": keypoints2d,
             "keypoints3d": keypoints3d,
             "vertices": vertices,
-            
             "center": center,
             "scale": scale,
             "K": K,
+            "markers3d": markers3d,
         }
         
         # 1. Crop and Rot
         results = self.bbox_center_jitter(results)
         results = self.get_random_scale_rotation(results)
-        # results = self.mesh_affine(results)
         results = self.mesh_perspective_trans(results)
 
         # 2. 3D KP Root Relative
         root_point = results['keypoints3d'][self.root_index].copy()
         results['keypoints3d'] = results['keypoints3d'] - root_point[None, :]
+        results['markers3d'] = results['markers3d'] - root_point[None, :]  # Normalize markers3d relative to the root point
         results['vertices'] = results['vertices'] - root_point[None, :]
         
         hand_img_len = IMAGE_SHAPE[0]
@@ -128,10 +133,12 @@ class HandDataset(Dataset):
         hand_world_len = 0.2
         fx = results['K'][0][0]
         fy = results['K'][1][1]
-        camare_relative_k = np.sqrt(fx * fy * (hand_world_len**2) / (hand_img_len**2))
-        gamma = root_depth / camare_relative_k
+        camera_relative_k = np.sqrt(fx * fy * (hand_world_len**2) / (hand_img_len**2))
+        gamma = root_depth / camera_relative_k
+        
         # 3. Random Flip 
         results = self.random_flip(results)
+        
         # 4. Image aug
         results = self.random_channel_noise(results)
         results['img'] = self.random_bright(image=results['img'])['image']
@@ -147,7 +154,8 @@ class HandDataset(Dataset):
         xyz = results["keypoints3d"]
         if NORMALIZE_3D_GT:
             joints_bone_len = np.sqrt(((xyz[0:1] - xyz[9:10])**2).sum(axis=-1, keepdims=True) + 1e-8)
-            xyz = xyz  / joints_bone_len
+            xyz = xyz / joints_bone_len
+            results['markers3d'] = results['markers3d'] / joints_bone_len  # Normalize markers3d if 3D normalization is enabled
         
         xyz_valid = 1
 
@@ -155,18 +163,20 @@ class HandDataset(Dataset):
             xyz_valid = 0
 
         img = results['img']
-        img = np.transpose(img, (2,0,1))
+        img = np.transpose(img, (2, 0, 1))
         data = {
             "img": img,
             "uv": results["keypoints2d"],
             "xyz": xyz,
-            "vertices": results['vertices'],                
+            "vertices": results['vertices'],
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
+            "markers3d": results['markers3d'],  # Ensure markers3d is included in the final returned data
         }
 
         return data
+
 
 def build_train_loader(batch_size):
 	dataset = HandDataset(all_info)
@@ -177,7 +187,7 @@ def build_train_loader(batch_size):
 
 # if __name__ == "__main__":
 #     train_loader = build_train_loader(_CONFIG['TRAIN']['DATALOADER']['MINIBATCH_SIZE_PER_DIVICE'])
-#     batch = next(train_loader)
+#     next(train_loader)
 #     with open('batch_data.pkl', 'rb') as f:
 #         pickle.dump(batch, f)
 #     from IPython import embed 

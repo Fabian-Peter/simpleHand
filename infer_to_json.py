@@ -4,6 +4,8 @@ import numpy as np
 import os
 from tqdm import tqdm
 
+import cv2
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, SequentialSampler
@@ -124,6 +126,63 @@ def verts2pcd(verts, color=None):
             pcd.paint_uniform_color([0, 0, 1.0])
     return pcd
 
+"""
+def compare_2d_predictions(pred_uv, gt_uv, image_path):
+    
+    Compare predicted 2D UV coordinates with ground truth on the original image.
+    
+    Args:
+        pred_uv (np.ndarray): Predicted UV coordinates, shape (N, 2).
+        gt_uv (np.ndarray): Ground truth UV coordinates, shape (N, 2).
+        image_path (str): Path to the image associated with the annotations.
+    
+    # Load the image
+    image = cv2.imread(image_path)
+    if image is None:
+        raise FileNotFoundError(f"Image not found at {image_path}")
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    # Set up visualization properties
+    point_radius = 5
+    gt_color = (0, 255, 0)  # Green for ground truth
+    pred_color = (255, 0, 0)  # Red for predictions
+    error_color = (255, 255, 255)  # White for error text
+
+    # Create a copy of the image to annotate
+    annotated_image = image.copy()
+
+    print(f"pred_uv: {pred_uv}")
+    print(f"gt_uv: {gt_uv}")
+
+    # Draw keypoints and errors
+    for i, (gt, pred) in enumerate(zip(gt_uv, pred_uv)):
+        gt_x, gt_y = int(gt[0]), int(gt[1])
+        pred_x, pred_y = int(pred[0]), int(pred[1])
+
+        # Draw ground truth keypoint
+        cv2.circle(annotated_image, (gt_x, gt_y), point_radius, gt_color, -1)
+
+        # Draw predicted keypoint
+        cv2.circle(annotated_image, (pred_x, pred_y), point_radius, pred_color, -1)
+
+        # Draw error line
+        cv2.line(annotated_image, (gt_x, gt_y), (pred_x, pred_y), (255, 255, 0), 1)
+
+        # Annotate with error distance
+        error = np.linalg.norm(gt - pred)
+        cv2.putText(
+            annotated_image, f"{error:.2f}", (pred_x + 10, pred_y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.4, error_color, 1, cv2.LINE_AA
+        )
+
+    # Display the annotated image
+    plt.figure(figsize=(10, 10))
+    plt.imshow(annotated_image)
+    plt.axis('off')
+    plt.title("2D Keypoint Comparison: Predictions vs Ground Truth")
+    plt.show()
+
+"""
 
 def make_root_relative(keypoints3d, root_index=0):
     """
@@ -333,9 +392,6 @@ def main(epoch, tta=False, postfix=""):
     assert epoch.startswith('epoch'), "type epoch_15 for the 15th epoch"
     log_model_dir = get_log_model_dir(_CONFIG['NAME'])
     model_path = os.path.join(log_model_dir, epoch)
-    # from IPython import embed 
-    # embed()
-    # exit()
     print(model_path)
     model = HandNet(_CONFIG, pretrained=False)
 
@@ -345,7 +401,6 @@ def main(epoch, tta=False, postfix=""):
     model.cuda()
     
     bmk = val_cfg['BMK']
-    
     dataset = HandMeshEvalDataset(bmk["json_dir"], val_cfg["IMAGE_SHAPE"], bmk["scale_enlarge"])
 
     pred_uv_list, xyz_pred_list, verts_pred_list, xyz_gt_list, verts_gt_list = infer_single_json(val_cfg, bmk, model, rot_angle=0)
@@ -359,19 +414,26 @@ def main(epoch, tta=False, postfix=""):
         ori_info['xyz'] = gt_joints
         ori_info['vertices'] = gt_vertices
 
+        # Visualize and compare 2D UV predictions
+        image_path = ori_info.get("image_path")
+        if image_path:
+            gt_uv = ori_info.get('uv')  # Assuming 'uv' contains ground truth 2D coordinates
+            #print(f"gt_uv: {gt_uv}")
+            #compare_2d_predictions(pred_uv, gt_uv, image_path)
+
     eval_xyz, eval_xyz_aligned = EvalUtil(), EvalUtil()
     eval_mesh_err, eval_mesh_err_aligned = EvalUtil(num_kp=778), EvalUtil(num_kp=778)
     f_score, f_score_aligned = list(), list()
     f_threshs = [0.005, 0.015]
     shape_is_mano = None
+
     for idx in range(len(xyz_gt_list)):
         xyz, verts = xyz_gt_list[idx], verts_gt_list[idx]
         xyz, verts = [np.array(x) for x in [xyz, verts]]
-
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
-        visualize_hand_predictions(pred_xyz, gt_xyz)
+        #visualize_hand_predictions(pred_xyz, gt_xyz)
 
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]
@@ -422,7 +484,6 @@ def main(epoch, tta=False, postfix=""):
         # F-scores
         l, la = list(), list()
         for t in f_threshs:
-            # for each threshold calculate the f score and the f score of the aligned vertices
             f, _, _ = calculate_fscore(verts, verts_pred, t)
             l.append(f)
             f, _, _ = calculate_fscore(verts, verts_pred_aligned, t)
@@ -449,7 +510,6 @@ def main(epoch, tta=False, postfix=""):
         print('auc=%.3f, mean_kp3d_avg=%.2f cm\n' % (mesh_al_auc3d, mesh_al_mean3d * 100.0))
     else:
         mesh_mean3d, mesh_auc3d, mesh_al_mean3d, mesh_al_auc3d = -1.0, -1.0, -1.0, -1.0
-
         pck_mesh, thresh_mesh = np.array([-1.0, -1.0]), np.array([0.0, 1.0])
         pck_mesh_al, thresh_mesh_al = np.array([-1.0, -1.0]), np.array([0.0, 1.0])
 
@@ -467,6 +527,7 @@ def main(epoch, tta=False, postfix=""):
          json.dump(dataset.all_info, f)
             
     print(f"Result save to {result_json_path}")
+
         
 
 if __name__ == "__main__":
