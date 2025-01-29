@@ -1,3 +1,7 @@
+# Master Thesis HybridHands
+
+As part of my master’s thesis, I used this model to evaluate synthesized hand pose estimation data. The evaluation focused on assessing the quality and effectiveness of the synthetic dataset in training and testing hand pose estimation models.
+
 # News
 
 **20240916**: 🥇🥇 We won the 1st place, for 2 consecutive years, in Multiview Egocentric Hand Tracking challenge in conjunction with ECCV 2024.🏆🏆 [[Technical Report]](https://arxiv.org/abs/2409.19362)
