@@ -175,7 +175,6 @@ class Trainer:
         self.train_loader = build_train_loader(self.cfg["TRAIN"]["DATALOADER"]["MINIBATCH_SIZE_PER_DIVICE"])
         #debug
         sample_batch = next(self.train_loader)
-        print("batch marker sample: ", sample_batch['markers3d'])
         self.model.train()
 
     def after_epoch(self):
@@ -206,12 +205,15 @@ class Trainer:
 
         for k in batch_data:
             batch_data[k] = Tensor(batch_data[k]).cuda(self.local_rank).float()
+           
+        # Extract markers3d
+        markers3d = batch_data.get('markers3d', None)
 
         tdata = time.time() - iter_start_time
-        
+     
         self.optimizer.zero_grad()
         with torch.autocast(device_type='cuda', dtype=torch.float16):
-            losses = self.model(image, batch_data)
+            losses = self.model(image, batch_data, markers3d = markers3d)
             loss = losses['total_loss']
         self.grad_scaler.scale(loss).backward()
         if self.cfg['TRAIN'].get("CLIP_GRAD", None) is not None:

@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -54,10 +53,17 @@ class HandNet(nn.Module):
         mesh_head_cfg['block_types'] = block_types
         
         self.mesh_head = MeshHead(**mesh_head_cfg)        
+
+        self.markers3d_processor = nn.Sequential(
+            nn.Linear(15, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+        )
         
 
 
-    def infer(self, image):
+    def infer(self, image, markers3d = None):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -69,9 +75,21 @@ class HandNet(nn.Module):
         uv = self.keypoints_2d_head(global_feature)     
         # depth = self.depth_head(global_feature)
         
+        if markers3d is not None:
+            # Process markers3d with a small MLP
+            markers_features = markers3d.view(markers3d.size(0), -1)  # Flatten (B, 5, 3) -> (B, 15)
+            markers_features = self.markers3d_processor(markers_features) 
+
+            # Combine global image features with marker features
+            combined_features = torch.cat([global_feature, markers_features], dim=1)
+        else:
+            
+            combined_features = global_feature
+
         vertices = self.mesh_head(features, uv)
         joints = mesh_to_joints(vertices)
 
+        
         return {
             "uv": uv,
             # "root_depth": depth,
@@ -80,7 +98,7 @@ class HandNet(nn.Module):
         }
 
 
-    def forward(self, image, target=None):
+    def forward(self, image, target=None, markers3d = None):
         """get training loss
 
         Args:
@@ -90,7 +108,7 @@ class HandNet(nn.Module):
                 "xyz": [B,  21, 3],
                 "hand_uv_valid": [B, 21],
                 "gamma": [B, 1],    
-
+                "markers3d" : [B, 5, 3]
                 "vertices": [B, 778, 3],
                 "xyz_valid": [B,  21],
                 "verts_valid": [B, 1],
@@ -98,16 +116,29 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-        output_dict = self.infer(image)
+
+        
+
+        output_dict = self.infer(image, markers3d)
+
+        
+        if markers3d is not None:
+            marker_indices = [4, 8, 12, 16, 20]  # Joints corresponding to markers3d
+            joints_pred = output_dict['joints']
+            markers3d = markers3d.to(joints_pred.dtype)
+            joints_pred[:, marker_indices, :] = markers3d  # Set corresponding joint predictions to ground truth markers3d
+
+
         if self.training:
             assert target is not None
-            loss_dict = self._cal_single_hand_losses(output_dict, target)
+        
+            loss_dict = self._cal_single_hand_losses(output_dict, target, markers3d)
             return loss_dict
 
         return output_dict
 
 
-    def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict):
+    def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict, markers3d=None):
         """get training loss
 
         Args:
@@ -154,11 +185,20 @@ class HandNet(nn.Module):
         # root_depth_loss = root_depth_loss.mean()
 
 
+         # New loss for markers3d
+        if markers3d is not None:
+            marker_indices = [4, 8, 12, 16, 20]  # Joints corresponding to markers3d
+            markers3d_loss = l1_loss(joints_pred[:, marker_indices, :], joints_gt[:, marker_indices, :])
+        else:
+            markers3d_loss = torch.tensor(0.0)
+
+
         loss_dict = {
             "uv_loss": uv_loss * self.loss_cfg["UV_LOSS_WEIGHT"],
             "joints_loss": joints_loss * self.loss_cfg["JOINTS_LOSS_WEIGHT"],
             # "root_depth_loss": root_depth_loss * self.loss_cfg["DEPTH_LOSS_WEIGHT"],
-            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"],            
+            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"], 
+            "markers_loss": markers3d_loss * self.loss_cfg["MARKERS_LOSS_WEIGHT"],             
         }
 
         total_loss = 0
@@ -168,6 +208,7 @@ class HandNet(nn.Module):
         loss_dict['total_loss'] = total_loss
         
         return loss_dict
+
 
 
 if __name__ == "__main__":
@@ -210,5 +251,3 @@ if __name__ == "__main__":
 
     # loss = losses_dict['total_loss']
     # loss.backward()
-
-

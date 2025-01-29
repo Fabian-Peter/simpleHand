@@ -122,9 +122,11 @@ class HandDataset(Dataset):
         results = self.mesh_perspective_trans(results)
 
         # 2. 3D KP Root Relative
+        
         root_point = results['keypoints3d'][self.root_index].copy()
         results['keypoints3d'] = results['keypoints3d'] - root_point[None, :]
-        results['markers3d'] = results['markers3d'] - root_point[None, :]  # Normalize markers3d relative to the root point
+        #Root-joint normalization
+        #results['markers3d'] = results['markers3d'] - root_point[None, :]  # Normalize markers3d relative to the root point
         results['vertices'] = results['vertices'] - root_point[None, :]
         
         hand_img_len = IMAGE_SHAPE[0]
@@ -164,6 +166,9 @@ class HandDataset(Dataset):
 
         img = results['img']
         img = np.transpose(img, (2, 0, 1))
+        
+        #Removed wrist joint normalization
+        '''
         data = {
             "img": img,
             "uv": results["keypoints2d"],
@@ -173,6 +178,22 @@ class HandDataset(Dataset):
             "gamma": gamma,
             "xyz_valid": xyz_valid,
             "markers3d": results['markers3d'],  # Ensure markers3d is included in the final returned data
+        }
+        '''
+        #debug
+        data = {
+            "img": img,
+            "uv": results["keypoints2d"],
+            "keypoints2d": keypoints2d,
+            "xyz": keypoints3d,
+            "vertices": vertices,
+            "center": center,
+            "uv_valid": trans_coord_valid,
+            "scale": scale,
+            "gamma": gamma,
+            "xyz_valid": xyz_valid,
+            "K": K,
+            "markers3d": markers3d,
         }
 
         return data

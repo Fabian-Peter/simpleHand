@@ -32,7 +32,8 @@ _CONFIG = dict(
             UV_LOSS_WEIGHT = 1.0,
             JOINTS_LOSS_WEIGHT = 10.0,
             DEPTH_LOSS_WEIGHT = 1.0,
-            VERTICES_LOSS_WEIGHT = 10.0,            
+            VERTICES_LOSS_WEIGHT = 10.0,   
+            MARKERS_LOSS_WEIGHT = 10.0,        
         ),
 
     ),
