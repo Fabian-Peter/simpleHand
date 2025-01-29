@@ -210,7 +210,7 @@ class Trainer:
         markers3d = batch_data.get('markers3d', None)
 
         tdata = time.time() - iter_start_time
-     
+        
         self.optimizer.zero_grad()
         with torch.autocast(device_type='cuda', dtype=torch.float16):
             losses = self.model(image, batch_data, markers3d = markers3d)

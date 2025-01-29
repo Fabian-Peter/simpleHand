@@ -167,8 +167,7 @@ class HandDataset(Dataset):
         img = results['img']
         img = np.transpose(img, (2, 0, 1))
         
-        #Removed wrist joint normalization
-        '''
+        
         data = {
             "img": img,
             "uv": results["keypoints2d"],
@@ -179,22 +178,7 @@ class HandDataset(Dataset):
             "xyz_valid": xyz_valid,
             "markers3d": results['markers3d'],  # Ensure markers3d is included in the final returned data
         }
-        '''
-        #debug
-        data = {
-            "img": img,
-            "uv": results["keypoints2d"],
-            "keypoints2d": keypoints2d,
-            "xyz": keypoints3d,
-            "vertices": vertices,
-            "center": center,
-            "uv_valid": trans_coord_valid,
-            "scale": scale,
-            "gamma": gamma,
-            "xyz_valid": xyz_valid,
-            "K": K,
-            "markers3d": markers3d,
-        }
+       
 
         return data
 
