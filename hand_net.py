@@ -91,11 +91,11 @@ class HandNet(nn.Module):
         initial_vertices = self.mesh_head(features, uv)
         initial_joints = mesh_to_joints(initial_vertices)
         wrist_position = initial_joints[:, 0].detach()  # Assuming wrist is the first joint
-        
+
         if markers3d is not None:
             # PREDICT markers using initial features
             pred_markers = self.marker_head(global_feature).reshape(-1, len(INDICES), 3)
-    
+            print("Predicted markers shape:", pred_markers.shape)  # Should be [B,5,3]
             # Fuse features using PREDICTED markers
             marker_features = pred_markers.reshape(pred_markers.size(0), -1)
             fused_features = torch.cat([global_feature, marker_features], dim=1)
@@ -116,7 +116,6 @@ class HandNet(nn.Module):
             "joints": joints,
             "vertices": vertices,
             "pred_markers": pred_markers,
-            "relative_markers" : relative_markers if markers3d is not None else None,
         }
 
 
@@ -198,46 +197,37 @@ class HandNet(nn.Module):
         # root_depth_loss = root_depth_loss.mean()
 
         if 'markers3d' in gt_hand_dict and pred_hand_dict['pred_markers'] is not None:
-            abs_markers_gt = gt_hand_dict['markers3d']  # [B, 5, 3]
-    
-            # Use PREDICTED wrist position (detached)
-            wrist_pred = pred_hand_dict["joints"][:, 0].detach()  # [B, 3]
-            relative_markers_gt = abs_markers_gt - wrist_pred.unsqueeze(1)  # [B, 5, 3]
-    
-            markers_pred = pred_hand_dict['pred_markers']  # [B, 5, 3]
-    
-            # Handle validity mask
-            markers_valid = gt_hand_dict.get(
-                'markers_valid', 
-                torch.ones_like(abs_markers_gt[..., 0])  # [B, 5]
+            abs_markers_gt = gt_hand_dict['markers3d']  # [B,5,3]
+            wrist_pred = pred_hand_dict["joints"][:, 0].detach()  # <-- ADD THIS LINE
+            relative_markers_gt = abs_markers_gt - wrist_pred.unsqueeze(1)  # <-- DEFINE THIS FIRST
+            markers_pred = pred_hand_dict['pred_markers']  # [B,5,3]
+        
+            # IGNORE DATASET'S VALIDITY MASK - FORCE [B,5]
+            markers_valid = torch.ones(
+                markers_pred.size(0),  # Batch size
+                markers_pred.size(1),  # 5 markers
+                device=markers_pred.device
             )
-            if markers_valid.shape[1] == 21:  # Subset if needed
-                markers_valid = markers_valid[:, INDICES]
-    
-            marker_loss = l1_loss(markers_pred, relative_markers_gt, valid=markers_valid)
+        
+            marker_loss = l1_loss(markers_pred, relative_markers_gt, valid=markers_valid)           
             loss_dict["marker_loss"] = marker_loss * self.loss_cfg.get("MARKER_LOSS_WEIGHT", 1.0)
-
+            print("Marker pred shape:", markers_pred.shape)
+            print("Marker GT shape:", relative_markers_gt.shape)
+            print("Validity mask shape:", markers_valid.shape)
+        # Initialize loss_dict AFTER handling markers
         loss_dict = {
             "uv_loss": uv_loss * self.loss_cfg["UV_LOSS_WEIGHT"],
             "joints_loss": joints_loss * self.loss_cfg["JOINTS_LOSS_WEIGHT"],
-            # "root_depth_loss": root_depth_loss * self.loss_cfg["DEPTH_LOSS_WEIGHT"],
             "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"],            
         }
 
-        total_loss = 0
-        for k in loss_dict:
-            total_loss += loss_dict[k]
-
-        if 'markers3d' in gt_hand_dict and pred_hand_dict['pred_markers'] is not None:
-            markers_pred = pred_hand_dict['pred_markers']
-            markers_valid = torch.ones_like(markers_gt[..., 0])
-            
-            marker_loss = l1_loss(markers_pred, relative_markers_gt, valid=markers_valid)
+        # Add marker loss if computed
+        if "marker_loss" in locals():
             loss_dict["marker_loss"] = marker_loss * self.loss_cfg.get("MARKER_LOSS_WEIGHT", 1.0)
-        
+
         total_loss = sum(loss_dict.values())
         loss_dict['total_loss'] = total_loss
-        
+    
         return loss_dict
 
 

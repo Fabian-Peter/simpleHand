@@ -166,7 +166,7 @@ class HandDataset(Dataset):
 
         img = results['img']
         img = np.transpose(img, (2, 0, 1))
-        
+              
         
         data = {
             "img": img,
@@ -177,7 +177,7 @@ class HandDataset(Dataset):
             "gamma": gamma,
             "xyz_valid": xyz_valid,
             "markers3d": results['markers3d'], 
-            "markers_valid" : results['markers3d']
+            "markers_valid": np.ones((5,), dtype=np.float32)
         }
 
         return data

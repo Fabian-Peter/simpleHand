@@ -28,6 +28,10 @@ _CONFIG = dict(
             # block_types = ["identity", "identity", "identity"], # attention, identity, conv
             
         ),
+        MARKER_HEAD=dict(
+            in_features = 1216,
+            num_markers = 5,
+        ),
         LOSSES=dict(
             UV_LOSS_WEIGHT = 1.0,
             JOINTS_LOSS_WEIGHT = 10.0,
