@@ -177,6 +177,7 @@ class HandDataset(Dataset):
             "gamma": gamma,
             "xyz_valid": xyz_valid,
             "markers3d": results['markers3d'], 
+            "markers_valid" : results['markers3d']
         }
 
         return data

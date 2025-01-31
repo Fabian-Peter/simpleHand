@@ -93,23 +93,20 @@ class HandNet(nn.Module):
         wrist_position = initial_joints[:, 0].detach()  # Assuming wrist is the first joint
         
         if markers3d is not None:
-            # Convert markers to wrist-relative coordinates
-            relative_markers = self.compute_relative_markers(markers3d, wrist_position)
-            
-            # Predict marker positions
+            # PREDICT markers using initial features
             pred_markers = self.marker_head(global_feature).reshape(-1, len(INDICES), 3)
-            
-            # Fuse features
-            marker_features = relative_markers.reshape(relative_markers.size(0), -1)
+    
+            # Fuse features using PREDICTED markers
+            marker_features = pred_markers.reshape(pred_markers.size(0), -1)
             fused_features = torch.cat([global_feature, marker_features], dim=1)
             enhanced_features = self.fusion_layer(fused_features)
-            
-            # Make final predictions with enhanced features
+    
+            # Make final predictions
             uv = self.keypoints_2d_head(enhanced_features)
             vertices = self.mesh_head(features, uv)
             joints = mesh_to_joints(vertices)
         else:
-            # If no markers provided, use initial predictions
+            # Inference path (no markers)
             pred_markers = None
             vertices = initial_vertices
             joints = initial_joints
@@ -173,6 +170,8 @@ class HandNet(nn.Module):
             },            
 
         """
+        
+
         uv_pred = pred_hand_dict['uv']
         # root_depth_pred = pred_hand_dict['root_depth']
         joints_pred = pred_hand_dict["joints"]
@@ -198,6 +197,25 @@ class HandNet(nn.Module):
         # root_depth_loss = (torch.abs(root_depth_pred- root_depth_gt)).mean()
         # root_depth_loss = root_depth_loss.mean()
 
+        if 'markers3d' in gt_hand_dict and pred_hand_dict['pred_markers'] is not None:
+            abs_markers_gt = gt_hand_dict['markers3d']  # [B, 5, 3]
+    
+            # Use PREDICTED wrist position (detached)
+            wrist_pred = pred_hand_dict["joints"][:, 0].detach()  # [B, 3]
+            relative_markers_gt = abs_markers_gt - wrist_pred.unsqueeze(1)  # [B, 5, 3]
+    
+            markers_pred = pred_hand_dict['pred_markers']  # [B, 5, 3]
+    
+            # Handle validity mask
+            markers_valid = gt_hand_dict.get(
+                'markers_valid', 
+                torch.ones_like(abs_markers_gt[..., 0])  # [B, 5]
+            )
+            if markers_valid.shape[1] == 21:  # Subset if needed
+                markers_valid = markers_valid[:, INDICES]
+    
+            marker_loss = l1_loss(markers_pred, relative_markers_gt, valid=markers_valid)
+            loss_dict["marker_loss"] = marker_loss * self.loss_cfg.get("MARKER_LOSS_WEIGHT", 1.0)
 
         loss_dict = {
             "uv_loss": uv_loss * self.loss_cfg["UV_LOSS_WEIGHT"],
@@ -212,11 +230,9 @@ class HandNet(nn.Module):
 
         if 'markers3d' in gt_hand_dict and pred_hand_dict['pred_markers'] is not None:
             markers_pred = pred_hand_dict['pred_markers']
-            markers_gt = pred_hand_dict['relative_markers']
-            markers_gt = gt_hand_dict['markers3d']
-            markers_valid = gt_hand_dict.get('markers_valid', torch.ones_like(markers_gt[..., 0]))
+            markers_valid = torch.ones_like(markers_gt[..., 0])
             
-            marker_loss = l1_loss(markers_pred, markers_gt, valid=markers_valid)
+            marker_loss = l1_loss(markers_pred, relative_markers_gt, valid=markers_valid)
             loss_dict["marker_loss"] = marker_loss * self.loss_cfg.get("MARKER_LOSS_WEIGHT", 1.0)
         
         total_loss = sum(loss_dict.values())
