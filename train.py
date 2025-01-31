@@ -207,13 +207,14 @@ class Trainer:
             batch_data[k] = Tensor(batch_data[k]).cuda(self.local_rank).float()
            
         # Extract markers3d
-        markers3d = batch_data.get('markers3d', None)
+        markers3d = batch_data.get('markers3d')
 
         tdata = time.time() - iter_start_time
         
         self.optimizer.zero_grad()
         with torch.autocast(device_type='cuda', dtype=torch.float16):
-            losses = self.model(image, batch_data, markers3d = markers3d)
+            batch_data['markers3d'] = markers3d
+            losses = self.model(image, batch_data)
             loss = losses['total_loss']
         self.grad_scaler.scale(loss).backward()
         if self.cfg['TRAIN'].get("CLIP_GRAD", None) is not None:

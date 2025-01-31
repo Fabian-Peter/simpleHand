@@ -10,6 +10,7 @@ from models.modules import MeshHead, AttentionBlock, IdentityBlock, SepConvBlock
 from models.losses import mesh_to_joints
 from models.losses import l1_loss
 
+INDICES = [0, 4, 8, 12, 16]
 
 class HandNet(nn.Module):
     def __init__(self, cfg, pretrained=None):
@@ -52,15 +53,25 @@ class HandNet(nn.Module):
             block_types.append(block_map[name])
         mesh_head_cfg['block_types'] = block_types
         
-        self.mesh_head = MeshHead(**mesh_head_cfg)        
+        self.mesh_head = MeshHead(**mesh_head_cfg) 
 
-        self.markers3d_processor = nn.Sequential(
-            nn.Linear(15, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-        )
+        # Add new layers for marker integration
+        marker_cfg = model_cfg.get('MARKER_HEAD', {
+            'in_features': uv_cfg['in_features'],
+            'num_markers': 5  #toFix
+        })
+        self.marker_head = nn.Linear(marker_cfg['in_features'], marker_cfg['num_markers'] * 3)
         
+        # Add fusion layer to combine marker and regular features
+        self.fusion_layer = nn.Linear(uv_cfg['in_features'] + marker_cfg['num_markers'] * 3, uv_cfg['in_features'])
+              
+        
+    def compute_relative_markers(self, markers3d, wrist_joint):
+        """Convert camera space markers to wrist-relative coordinates"""
+        # markers3d: [B, N, 3], wrist_joint: [B, 3]
+        wrist_joint = wrist_joint.unsqueeze(1)  # [B, 1, 3]
+        relative_markers = markers3d - wrist_joint
+        return relative_markers
 
 
     def infer(self, image, markers3d = None):
@@ -72,33 +83,47 @@ class HandNet(nn.Module):
             features = self.backbone.forward_features(image)
         
         global_feature = self.avg_pool(features).squeeze(-1).squeeze(-1)
-        uv = self.keypoints_2d_head(global_feature)     
-        # depth = self.depth_head(global_feature)
+        
+        # Initial UV prediction
+        uv = self.keypoints_2d_head(global_feature)
+        
+        # Predict initial joints to get wrist position
+        initial_vertices = self.mesh_head(features, uv)
+        initial_joints = mesh_to_joints(initial_vertices)
+        wrist_position = initial_joints[:, 0].detach()  # Assuming wrist is the first joint
         
         if markers3d is not None:
-            # Process markers3d with a small MLP
-            markers_features = markers3d.view(markers3d.size(0), -1)  # Flatten (B, 5, 3) -> (B, 15)
-            markers_features = self.markers3d_processor(markers_features) 
-
-            # Combine global image features with marker features
-            combined_features = torch.cat([global_feature, markers_features], dim=1)
-        else:
+            # Convert markers to wrist-relative coordinates
+            relative_markers = self.compute_relative_markers(markers3d, wrist_position)
             
-            combined_features = global_feature
+            # Predict marker positions
+            pred_markers = self.marker_head(global_feature).reshape(-1, len(INDICES), 3)
+            
+            # Fuse features
+            marker_features = relative_markers.reshape(relative_markers.size(0), -1)
+            fused_features = torch.cat([global_feature, marker_features], dim=1)
+            enhanced_features = self.fusion_layer(fused_features)
+            
+            # Make final predictions with enhanced features
+            uv = self.keypoints_2d_head(enhanced_features)
+            vertices = self.mesh_head(features, uv)
+            joints = mesh_to_joints(vertices)
+        else:
+            # If no markers provided, use initial predictions
+            pred_markers = None
+            vertices = initial_vertices
+            joints = initial_joints
 
-        vertices = self.mesh_head(features, uv)
-        joints = mesh_to_joints(vertices)
-
-        
         return {
             "uv": uv,
-            # "root_depth": depth,
             "joints": joints,
-            "vertices": vertices,            
+            "vertices": vertices,
+            "pred_markers": pred_markers,
+            "relative_markers" : relative_markers if markers3d is not None else None,
         }
 
 
-    def forward(self, image, target=None, markers3d = None):
+    def forward(self, image, target=None):
         """get training loss
 
         Args:
@@ -108,7 +133,7 @@ class HandNet(nn.Module):
                 "xyz": [B,  21, 3],
                 "hand_uv_valid": [B, 21],
                 "gamma": [B, 1],    
-                "markers3d" : [B, 5, 3]
+
                 "vertices": [B, 778, 3],
                 "xyz_valid": [B,  21],
                 "verts_valid": [B, 1],
@@ -116,29 +141,18 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-
-        
-
+        markers3d = target.get('markers3d') if target is not None else None
         output_dict = self.infer(image, markers3d)
-
-        
-        if markers3d is not None:
-            marker_indices = [4, 8, 12, 16, 20]  # Joints corresponding to markers3d
-            joints_pred = output_dict['joints']
-            markers3d = markers3d.to(joints_pred.dtype)
-            joints_pred[:, marker_indices, :] = markers3d  # Set corresponding joint predictions to ground truth markers3d
-
 
         if self.training:
             assert target is not None
-        
-            loss_dict = self._cal_single_hand_losses(output_dict, target, markers3d)
+            loss_dict = self._cal_single_hand_losses(output_dict, target)
             return loss_dict
 
         return output_dict
 
 
-    def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict, markers3d=None):
+    def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict):
         """get training loss
 
         Args:
@@ -185,30 +199,30 @@ class HandNet(nn.Module):
         # root_depth_loss = root_depth_loss.mean()
 
 
-         # New loss for markers3d
-        if markers3d is not None:
-            marker_indices = [4, 8, 12, 16, 20]  # Joints corresponding to markers3d
-            markers3d_loss = l1_loss(joints_pred[:, marker_indices, :], joints_gt[:, marker_indices, :])
-        else:
-            markers3d_loss = torch.tensor(0.0)
-
-
         loss_dict = {
             "uv_loss": uv_loss * self.loss_cfg["UV_LOSS_WEIGHT"],
             "joints_loss": joints_loss * self.loss_cfg["JOINTS_LOSS_WEIGHT"],
             # "root_depth_loss": root_depth_loss * self.loss_cfg["DEPTH_LOSS_WEIGHT"],
-            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"], 
-            "markers_loss": markers3d_loss * self.loss_cfg["MARKERS_LOSS_WEIGHT"],             
+            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"],            
         }
 
         total_loss = 0
         for k in loss_dict:
             total_loss += loss_dict[k]
 
+        if 'markers3d' in gt_hand_dict and pred_hand_dict['pred_markers'] is not None:
+            markers_pred = pred_hand_dict['pred_markers']
+            markers_gt = pred_hand_dict['relative_markers']
+            markers_gt = gt_hand_dict['markers3d']
+            markers_valid = gt_hand_dict.get('markers_valid', torch.ones_like(markers_gt[..., 0]))
+            
+            marker_loss = l1_loss(markers_pred, markers_gt, valid=markers_valid)
+            loss_dict["marker_loss"] = marker_loss * self.loss_cfg.get("MARKER_LOSS_WEIGHT", 1.0)
+        
+        total_loss = sum(loss_dict.values())
         loss_dict['total_loss'] = total_loss
         
         return loss_dict
-
 
 
 if __name__ == "__main__":

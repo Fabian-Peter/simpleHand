@@ -176,9 +176,8 @@ class HandDataset(Dataset):
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
-            "markers3d": results['markers3d'],  # Ensure markers3d is included in the final returned data
+            "markers3d": results['markers3d'], 
         }
-       
 
         return data
 
