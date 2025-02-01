@@ -114,6 +114,7 @@ class HandDataset(Dataset):
             "scale": scale,
             "K": K,
             "markers3d": markers3d,
+            "joints": np.array(data_info['xyz'], dtype=np.float32),
         }
         
         # 1. Crop and Rot
@@ -176,8 +177,8 @@ class HandDataset(Dataset):
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
-            "markers3d": results['markers3d'], 
-            "markers_valid": np.ones((5,), dtype=np.float32)
+            "markers3d": results['markers3d'],   
+            "joints": results['joints'],     
         }
 
         return data
