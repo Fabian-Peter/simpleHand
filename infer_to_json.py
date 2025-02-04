@@ -231,16 +231,7 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(111, projection='3d')
     
-    # Plot ground truth
-    ax.scatter(gt_coords_relative[:, 0], gt_coords_relative[:, 1], gt_coords_relative[:, 2], c='g', label='Ground Truth', s=50)
-    for start, end in skeleton:
-        ax.plot(
-            [gt_coords_relative[start, 0], gt_coords_relative[end, 0]],
-            [gt_coords_relative[start, 1], gt_coords_relative[end, 1]],
-            [gt_coords_relative[start, 2], gt_coords_relative[end, 2]],
-            c='g', linestyle='-', linewidth=2
-        )
-    
+   
     # Plot predictions
     ax.scatter(pred_coords[:, 0], pred_coords[:, 1], pred_coords[:, 2], c='r', label='Predictions', s=50)
     for start, end in skeleton:
@@ -433,7 +424,7 @@ def main(epoch, tta=False, postfix=""):
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
-        #visualize_hand_predictions(pred_xyz, gt_xyz)
+        visualize_hand_predictions(pred_xyz, gt_xyz)
 
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]

@@ -56,8 +56,7 @@ class HandNet(nn.Module):
         self.keypoints_2d_head = nn.Linear(uv_cfg['in_features'], uv_cfg['out_features'])
         self.root_head = nn.Linear(backbone_out_features, self.root_dim)
     
-        # marker_normalizer should map from total_input_dim to uv_cfg['in_features']
-        self.marker_normalizer = nn.Linear(self.total_input_dim, uv_cfg['in_features'])
+        self.marker_normalizer = nn.Linear(self.total_input_dim, model_cfg["UV_HEAD"]["in_features"])
     
         # Rest of your initialization code...
         mesh_head_cfg = model_cfg["MESH_HEAD"].copy()
@@ -75,7 +74,8 @@ class HandNet(nn.Module):
     
         self.mesh_head = MeshHead(**mesh_head_cfg)
 
-    def infer(self, image, target=None):
+    def infer(self, image, markers_input):
+        # Backbone forward pass
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -84,46 +84,37 @@ class HandNet(nn.Module):
             features = self.backbone.forward_features(image)
     
         global_feature = self.avg_pool(features).squeeze(-1).squeeze(-1)  # [B, C]
-        uv = self.keypoints_2d_head(global_feature)     
     
-        vertices = self.mesh_head(features, uv)
-        joints = mesh_to_joints(vertices)
-
+        # Predict root joint
         root_pred = self.root_head(global_feature)  # [B, 3]
-        device = global_feature.device
-
-        batch_size = global_feature.shape[0]
-
-        if self.training and target is not None:
-            markers_gt = target['markers3d']  # [B, 5, 3]
-            normalized_markers = markers_gt - root_pred.unsqueeze(1)  # [B, 5, 3]
-        else:
-            normalized_markers = torch.zeros(batch_size, 5, 3, device=device)  # [B, 5, 3]
-
-        marker_features = normalized_markers.reshape(batch_size, -1)  # [B, 15]
-          
-        # Ensure concatenation is done correctly
+    
+        # Normalize input markers by root
+        markers_input = markers_input.reshape(-1, 5, 3)  # [B, 5, 3]
+        normalized_markers = markers_input - root_pred.unsqueeze(1)  # [B, 5, 3]
+        normalized_markers = normalized_markers.reshape(-1, 15)  # [B, 15]
+    
+        # Fuse features with normalized markers
         fused_features = torch.cat([
-            global_feature,  # [B, C]
-            root_pred,      # [B, 3]
-            marker_features # [B, 15]
+            global_feature, 
+            root_pred, 
+            ormalized_markers
         ], dim=1)
-           
         enhanced_features = self.marker_normalizer(fused_features)
     
+        # Final predictions
         uv = self.keypoints_2d_head(enhanced_features)
         vertices = self.mesh_head(features, uv)
         joints = mesh_to_joints(vertices)
-
+    
         return {
             "uv": uv,
             "joints": joints,
-            "vertices": vertices,  
-            "root_pred": root_pred          
+            "vertices": vertices,
+            "root_pred": root_pred
         }
 
 
-    def forward(self, image, target=None):
+    def forward(self, image, markers_input, target=None):
         """get training loss
 
         Args:
@@ -141,7 +132,7 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-        output_dict = self.infer(image, target)
+        output_dict = self.infer(image, markers_input)
         if self.training:
             assert target is not None
             loss_dict = self._cal_single_hand_losses(output_dict, target)
