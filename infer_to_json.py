@@ -424,7 +424,7 @@ def main(epoch, tta=False, postfix=""):
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
-        visualize_hand_predictions(pred_xyz, gt_xyz)
+        #visualize_hand_predictions(pred_xyz, gt_xyz)
 
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]

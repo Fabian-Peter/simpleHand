@@ -17,49 +17,29 @@ class HandNet(nn.Module):
         self.cfg = cfg
         model_cfg = cfg["MODEL"]
         backbone_cfg = model_cfg["BACKBONE"]
-    
+
         self.loss_cfg = model_cfg["LOSSES"]
-    
+
         if pretrained is None:
             pretrained=backbone_cfg['pretrain']            
 
         if "hiera" in backbone_cfg['model_name']:
-            self.backbone = hiera.__dict__[backbone_cfg['model_name']](
-                pretrained=True, 
-                checkpoint="mae_in1k",  
-                drop_path_rate=backbone_cfg['drop_path_rate']
-            )
+            self.backbone = hiera.__dict__[backbone_cfg['model_name']](pretrained=True, checkpoint="mae_in1k",  drop_path_rate=backbone_cfg['drop_path_rate'])
             self.is_hiera = True
         else:
-            self.backbone = timm.create_model(
-                backbone_cfg['model_name'], 
-                pretrained=pretrained, 
-                drop_path_rate=backbone_cfg['drop_path_rate']
-            )
+            self.backbone = timm.create_model(backbone_cfg['model_name'], pretrained=pretrained, drop_path_rate=backbone_cfg['drop_path_rate'])
             self.is_hiera = False
-        
+            
         self.avg_pool = nn.AvgPool2d((7, 7), 1)            
 
         uv_cfg = model_cfg['UV_HEAD']
         depth_cfg = model_cfg['DEPTH_HEAD']
 
-        # Get backbone output features
-        backbone_out_features = self.backbone.num_features if hasattr(self.backbone, 'num_features') else 1216
-    
-        # Define dimensions
-        self.backbone_dim = backbone_out_features  # 1216
-        self.root_dim = 3
-        self.markers_dim = 15  # 5 markers * 3 coordinates
-        self.total_input_dim = self.backbone_dim + self.root_dim + self.markers_dim  # 1234
-    
-        # Initialize layers with correct dimensions
         self.keypoints_2d_head = nn.Linear(uv_cfg['in_features'], uv_cfg['out_features'])
-        self.root_head = nn.Linear(backbone_out_features, self.root_dim)
-    
-        self.marker_normalizer = nn.Linear(self.total_input_dim, model_cfg["UV_HEAD"]["in_features"])
-    
-        # Rest of your initialization code...
+        # self.depth_head = nn.Linear(depth_cfg['in_features'], depth_cfg['out_features'])
+        
         mesh_head_cfg = model_cfg["MESH_HEAD"].copy()
+        
         block_types_name = mesh_head_cfg['block_types']
         block_types = []
         block_map = {
@@ -67,54 +47,39 @@ class HandNet(nn.Module):
             "identity": IdentityBlock,
             "conv": SepConvBlock,
         }
-    
+        
         for name in block_types_name:
             block_types.append(block_map[name])
         mesh_head_cfg['block_types'] = block_types
-    
-        self.mesh_head = MeshHead(**mesh_head_cfg)
+        
+        self.mesh_head = MeshHead(**mesh_head_cfg)        
+        
 
-    def infer(self, image, markers_input):
-        # Backbone forward pass
+
+    def infer(self, image):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
             features = features.permute(0, 3, 1, 2).contiguous()
         else:
             features = self.backbone.forward_features(image)
-    
-        global_feature = self.avg_pool(features).squeeze(-1).squeeze(-1)  # [B, C]
-    
-        # Predict root joint
-        root_pred = self.root_head(global_feature)  # [B, 3]
-    
-        # Normalize input markers by root
-        markers_input = markers_input.reshape(-1, 5, 3)  # [B, 5, 3]
-        normalized_markers = markers_input - root_pred.unsqueeze(1)  # [B, 5, 3]
-        normalized_markers = normalized_markers.reshape(-1, 15)  # [B, 15]
-    
-        # Fuse features with normalized markers
-        fused_features = torch.cat([
-            global_feature, 
-            root_pred, 
-            ormalized_markers
-        ], dim=1)
-        enhanced_features = self.marker_normalizer(fused_features)
-    
-        # Final predictions
-        uv = self.keypoints_2d_head(enhanced_features)
+        
+        global_feature = self.avg_pool(features).squeeze(-1).squeeze(-1)
+        uv = self.keypoints_2d_head(global_feature)     
+        # depth = self.depth_head(global_feature)
+        
         vertices = self.mesh_head(features, uv)
         joints = mesh_to_joints(vertices)
-    
+
         return {
             "uv": uv,
+            # "root_depth": depth,
             "joints": joints,
-            "vertices": vertices,
-            "root_pred": root_pred
+            "vertices": vertices,            
         }
 
 
-    def forward(self, image, markers_input, target=None):
+    def forward(self, image, target=None):
         """get training loss
 
         Args:
@@ -132,7 +97,7 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-        output_dict = self.infer(image, markers_input)
+        output_dict = self.infer(image)
         if self.training:
             assert target is not None
             loss_dict = self._cal_single_hand_losses(output_dict, target)
@@ -183,9 +148,6 @@ class HandNet(nn.Module):
         joints_loss = l1_loss(joints_pred, joints_gt, valid=hand_xyz_valid)
         vertices_loss = l1_loss(vertices_pred, vertices_gt, valid=hand_xyz_valid)
 
-        root_pred = pred_hand_dict["joints"][:, 0]  # [B,3]
-        root_gt = gt_hand_dict['joints'][:, 0]  # [B,3]
-        root_loss = F.l1_loss(root_pred, root_gt)
 
         # root_depth_loss = (torch.abs(root_depth_pred- root_depth_gt)).mean()
         # root_depth_loss = root_depth_loss.mean()
@@ -195,8 +157,7 @@ class HandNet(nn.Module):
             "uv_loss": uv_loss * self.loss_cfg["UV_LOSS_WEIGHT"],
             "joints_loss": joints_loss * self.loss_cfg["JOINTS_LOSS_WEIGHT"],
             # "root_depth_loss": root_depth_loss * self.loss_cfg["DEPTH_LOSS_WEIGHT"],
-            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"], 
-            "root_loss": root_loss * 2.0 #todo           
+            "vertices_loss": vertices_loss * self.loss_cfg["VERTICES_LOSS_WEIGHT"],            
         }
 
         total_loss = 0

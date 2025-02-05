@@ -28,16 +28,11 @@ _CONFIG = dict(
             # block_types = ["identity", "identity", "identity"], # attention, identity, conv
             
         ),
-        MARKER_HEAD=dict(
-            in_features = 1216,
-            num_markers = 5,
-        ),
         LOSSES=dict(
             UV_LOSS_WEIGHT = 1.0,
             JOINTS_LOSS_WEIGHT = 10.0,
             DEPTH_LOSS_WEIGHT = 1.0,
-            VERTICES_LOSS_WEIGHT = 10.0,   
-            MARKERS_LOSS_WEIGHT = 10.0,        
+            VERTICES_LOSS_WEIGHT = 10.0,            
         ),
 
     ),
@@ -46,8 +41,7 @@ _CONFIG = dict(
         DATASET_DIR='/home/fabian/simpleHand/data/myHAND/training/rgb/',
         JSON_DIR='dataset/train.json',
         NORMALIZE_3D_GT=False,
-        ROOT_INDEX=0,    
-        INDICES = [4,8,12,16,20],    
+        ROOT_INDEX=9,        
         AUG=dict(
             RandomChannelNoise=dict(noise_factor=0.4),
             RandomBrightnessContrastMap=dict(
@@ -71,7 +65,6 @@ _CONFIG = dict(
         DATALOADER=dict(
             MINIBATCH_SIZE_PER_DIVICE=32,
             MINIBATCH_PER_EPOCH=32,
-            DROP_LAST=True,
             NAME="train"
         ),
 				
@@ -93,7 +86,7 @@ _CONFIG = dict(
         BMK=dict(
             name="FreiHand",
 			json_dir='dataset/eval.json',
-            eval_dir="/data/FreiHAND/evaluation/rgb/",
+            eval_dir="/data/myHAND/evaluation/rgb/",
             scale_enlarge=1.25,
             ),
         IMAGE_SHAPE=(224, 224),
