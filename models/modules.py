@@ -25,6 +25,24 @@ def remap_uv(feat: Tensor, uv_coord: Tensor) -> Tensor:
     return select_feat
 
 
+class MarkerBranch(nn.Module):
+    def __init__(self, in_channels=5, out_channels=64):
+        super(MarkerBranch, self).__init__()
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+    
+    def forward(self, x):
+        return self.conv_layers(x)
+
 class MlpEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()

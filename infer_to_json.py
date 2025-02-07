@@ -348,7 +348,8 @@ def infer_single_json(val_cfg, bmk, model, rot_angle=0):
         trans_matrix_3d_inv = torch.linalg.inv(trans_matrix_3d)
         
         with torch.no_grad():
-            res = model(image)
+            marker_heatmaps = batch_data.get('marker_heatmaps')  # Or generate them as needed
+            res = model(image, marker_heatmaps=marker_heatmaps)
             joints = res["joints"]
             uv = res["uv"]
             vertices = res['vertices']
@@ -433,7 +434,7 @@ def main(epoch, tta=False, postfix=""):
         pred_xyz = np.array(xyz_pred_list[idx])
 
         #visualizer
-        #aligned_pred = align_w_scale(gt_xyz, pred_xyz)
+        aligned_pred = align_w_scale(gt_xyz, pred_xyz)
         #visualize_3d_keypoints(aligned_pred, gt_xyz)
         
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
