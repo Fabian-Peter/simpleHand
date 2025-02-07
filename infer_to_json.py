@@ -17,8 +17,8 @@ from utils import get_log_model_dir
 
 from scipy.linalg import orthogonal_procrustes
 import open3d as o3d
-import numpy as np
 
+import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -184,6 +184,72 @@ def compare_2d_predictions(pred_uv, gt_uv, image_path):
 
 """
 
+
+def visualize_3d_keypoints(pred_keypoints, gt_keypoints, title="3D Keypoint Comparison"):
+    """
+    Visualizes predicted 3D keypoints against ground truth keypoints.
+    
+    Args:
+        pred_keypoints (np.ndarray): Array of predicted keypoints of shape (N, 3).
+        gt_keypoints (np.ndarray): Array of ground truth keypoints of shape (N, 3).
+        skeleton (list of tuple): Optional list of connections (pairs of keypoint indices) that form the hand skeleton.
+        title (str): Title of the plot.
+    """
+
+    skeleton = [
+        (0, 1), (1, 2), (2, 3), (3, 4),    # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),    # Index
+        (0, 9), (9, 10), (10, 11), (11, 12), # Middle
+        (0, 13), (13, 14), (14, 15), (15, 16), # Ring
+        (0, 17), (17, 18), (18, 19), (19, 20)  # Pinky
+    ]
+    # Ensure inputs are numpy arrays
+    pred_keypoints = np.array(pred_keypoints)
+    gt_keypoints = np.array(gt_keypoints)
+
+    # Create a 3D plot
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot ground truth keypoints (for example, blue circles)
+    ax.scatter(gt_keypoints[:, 0], gt_keypoints[:, 1], gt_keypoints[:, 2],
+               c='blue', marker='o', s=50, label='Ground Truth')
+    
+    # Plot predicted keypoints (for example, red triangles)
+    ax.scatter(pred_keypoints[:, 0], pred_keypoints[:, 1], pred_keypoints[:, 2],
+               c='red', marker='^', s=50, label='Prediction')
+    
+    # Draw lines connecting corresponding keypoints to highlight errors
+    for i in range(len(gt_keypoints)):
+        xs = [gt_keypoints[i, 0], pred_keypoints[i, 0]]
+        ys = [gt_keypoints[i, 1], pred_keypoints[i, 1]]
+        zs = [gt_keypoints[i, 2], pred_keypoints[i, 2]]
+        ax.plot(xs, ys, zs, c='gray', linestyle='--', linewidth=1)
+
+    # Optionally, if you have a skeleton defined (as connections between keypoints), plot it:
+    if skeleton is not None:
+        # Draw the skeleton for ground truth (dashed blue)
+        for (i, j) in skeleton:
+            ax.plot([gt_keypoints[i, 0], gt_keypoints[j, 0]],
+                    [gt_keypoints[i, 1], gt_keypoints[j, 1]],
+                    [gt_keypoints[i, 2], gt_keypoints[j, 2]],
+                    c='blue', linestyle='dashed', linewidth=2)
+        # Draw the skeleton for predictions (dashed red)
+        for (i, j) in skeleton:
+            ax.plot([pred_keypoints[i, 0], pred_keypoints[j, 0]],
+                    [pred_keypoints[i, 1], pred_keypoints[j, 1]],
+                    [pred_keypoints[i, 2], pred_keypoints[j, 2]],
+                    c='red', linestyle='dashed', linewidth=2)
+
+    # Set labels and title
+    ax.set_title(title)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.legend()
+
+    plt.show()
+
 def make_root_relative(keypoints3d, root_index=0):
     """
     Convert absolute 3D coordinates to root-relative coordinates.
@@ -198,64 +264,6 @@ def make_root_relative(keypoints3d, root_index=0):
     root_point = keypoints3d[root_index].copy()
     return keypoints3d - root_point[None, :]
 
-def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
-    """
-    Visualize and compare predicted and ground truth hand coordinates.
-    
-    Args:
-        pred_coords (np.ndarray): Shape (N, 3) array of predicted 3D coordinates
-        gt_coords (np.ndarray): Shape (N, 3) array of ground truth 3D coordinates
-        root_index (int): Index of the root joint for making coordinates root-relative
-    """
-    # Define skeleton connections (example for a 21-joint hand model)
-    skeleton = [
-        (0, 1), (1, 2), (2, 3), (3, 4),    # Thumb
-        (0, 5), (5, 6), (6, 7), (7, 8),    # Index
-        (0, 9), (9, 10), (10, 11), (11, 12), # Middle
-        (0, 13), (13, 14), (14, 15), (15, 16), # Ring
-        (0, 17), (17, 18), (18, 19), (19, 20)  # Pinky
-    ]
-    
-    # Make ground truth root-relative to match predictions
-    gt_coords_relative = make_root_relative(gt_coords, root_index)
-    
-    # Calculate error statistics
-    error = np.linalg.norm(pred_coords - gt_coords_relative, axis=1)
-    mean_error = np.mean(error)
-    max_error = np.max(error)
-    
-    print(f"Mean joint error: {mean_error:.4f}")
-    print(f"Max joint error: {max_error:.4f}")
-    
-    # Visualization
-    fig = plt.figure(figsize=(12, 6))
-    ax = fig.add_subplot(111, projection='3d')
-    
-   
-    # Plot predictions
-    ax.scatter(pred_coords[:, 0], pred_coords[:, 1], pred_coords[:, 2], c='r', label='Predictions', s=50)
-    for start, end in skeleton:
-        ax.plot(
-            [pred_coords[start, 0], pred_coords[end, 0]],
-            [pred_coords[start, 1], pred_coords[end, 1]],
-            [pred_coords[start, 2], pred_coords[end, 2]],
-            c='r', linestyle='--', linewidth=2
-        )
-    
-    # Add annotations for error
-    for i in range(len(gt_coords)):
-        ax.text(
-            gt_coords_relative[i, 0], gt_coords_relative[i, 1], gt_coords_relative[i, 2],
-            f'{error[i]:.2f}', color='blue', fontsize=8
-        )
-    
-    # Customize plot
-    ax.set_title("Hand Prediction vs Ground Truth")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.legend()
-    plt.show()
 
 def calculate_fscore(gt, pr, th=0.01):
     gt = verts2pcd(gt)
@@ -424,8 +432,10 @@ def main(epoch, tta=False, postfix=""):
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
-        #visualize_hand_predictions(pred_xyz, gt_xyz)
-
+        #visualizer
+        #aligned_pred = align_w_scale(gt_xyz, pred_xyz)
+        #visualize_3d_keypoints(aligned_pred, gt_xyz)
+        
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]
 
