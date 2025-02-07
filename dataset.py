@@ -11,7 +11,7 @@ from cfg import _CONFIG
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 from transforms import GetRandomScaleRotation, MeshAffine, RandomHorizontalFlip, \
             get_points_center_scale, RandomChannelNoise, BBoxCenterJitter, MeshPerspectiveTransform
-
+import torch
 
 DATA_CFG = _CONFIG["DATA"]
 IMAGE_SHAPE: List = DATA_CFG["IMAGE_SHAPE"][:2]
@@ -63,6 +63,73 @@ class HandDataset(Dataset):
         
         self.root_index = ROOT_INDEX
 
+    def generate_heatmap(self, height, width, normalized_coord, sigma=2):
+        """
+        Generates a Gaussian heatmap for a single normalized coordinate.
+    
+        Args:
+            height (int): Height of the heatmap (typically the image height).
+            width (int): Width of the heatmap (typically the image width).
+            normalized_coord (np.array): [x, y] in [0,1] representing the fingertip position.
+            sigma (float): Standard deviation of the Gaussian.
+        
+        Returns:
+            heatmap (np.array): A heatmap of shape [height, width] with values in [0,1].
+        """
+        # Convert normalized coordinates to pixel coordinates
+        cx = normalized_coord[0] * width
+        cy = normalized_coord[1] * height
+
+        # Create a mesh grid of (x,y) coordinates
+        y_grid, x_grid = np.ogrid[0:height, 0:width]
+        heatmap = np.exp(-((x_grid - cx) ** 2 + (y_grid - cy) ** 2) / (2 * sigma ** 2))
+        return heatmap.astype(np.float32)
+
+    def overlay_heatmaps_on_image(self, img, heatmaps, alpha=0.5):
+        """
+        Overlays the provided heatmaps onto the image.
+    
+        Args:
+            img (np.array): The original image (in BGR or RGB format; adjust accordingly).
+            heatmaps (np.array): Heatmaps of shape [N, H, W] (values assumed to be in [0,1]).
+            alpha (float): The blending factor.
+    
+        Returns:
+            overlay (np.array): The image with heatmaps overlayed.
+        """
+        # Combine the heatmaps; you can either sum them or take the maximum.
+        combined_heatmap = np.sum(heatmaps, axis=0)
+        combined_heatmap = np.clip(combined_heatmap, 0, 1)
+    
+        # Convert combined heatmap to 8-bit (0-255)
+        combined_heatmap = (combined_heatmap * 255).astype(np.uint8)
+    
+        # Apply a color map (e.g., COLORMAP_JET) to get a colored heatmap.
+        colored_heatmap = cv2.applyColorMap(combined_heatmap, cv2.COLORMAP_JET)
+    
+        # Make sure the image is in the same scale (0-255) and type.
+        if img.dtype != np.uint8:
+            img_vis = (img * 255).astype(np.uint8)
+        else:
+            img_vis = img.copy()
+    
+        # Blend the original image and the colored heatmap.
+        overlay = cv2.addWeighted(img_vis, 1 - alpha, colored_heatmap, alpha, 0)
+       
+        # Create the folder if it doesn't exist.
+        overlay_folder = "overlayimages"
+        if not os.path.exists(overlay_folder):
+            os.makedirs(overlay_folder)
+
+        # Create a unique filename. For example, you might use a timestamp.
+        import time
+        filename = os.path.join(overlay_folder, f"debug_overlay_{int(time.time() * 1000)}.jpg")
+        cv2.imwrite(filename, overlay)
+        print(f"Debug overlay saved as {filename}")
+
+
+        return overlay
+    
     def read_image(self, img_path):
         img = cv2.imread(img_path)
         return img
@@ -135,13 +202,34 @@ class HandDataset(Dataset):
         results = self.random_channel_noise(results)
         results['img'] = self.random_bright(image=results['img'])['image']
 
-        trans_uv = results["keypoints2d"]
-        trans_uv[:, 0] /= IMAGE_SHAPE[0]
-        trans_uv[:, 1] /= IMAGE_SHAPE[1]
+        final_img = results['img']
+        final_h, final_w = final_img.shape[:2]
+
+        trans_uv = results["keypoints2d"].copy()
+        trans_uv[:, 0] /= final_w
+        trans_uv[:, 1] /= final_h
 
         trans_coord_valid = (trans_uv > 0).astype("float32") * (trans_uv < 1).astype("float32") # Nx2x21x2
         trans_coord_valid = trans_coord_valid[:, 0] * trans_coord_valid[:, 1]
         trans_coord_valid *= coord_valid
+
+        #markers
+        ###############################################################
+
+        
+        fingertip_indices = [4, 8, 12, 16, 20]
+        fingertips_uv = trans_uv[fingertip_indices, :]  # Shape: [5, 2]
+
+        marker_heatmaps = []
+        for uv in fingertips_uv:
+            hm = self.generate_heatmap(final_h, final_w, uv, sigma=2)
+            marker_heatmaps.append(hm)
+    
+        # Stack the heatmaps to form a multi-channel array: shape [5, H, W]
+        marker_heatmaps = np.stack(marker_heatmaps, axis=0)
+        marker_heatmaps = torch.from_numpy(marker_heatmaps).float()
+        debug_overlay = self.overlay_heatmaps_on_image(final_img, marker_heatmaps.numpy(), alpha=0.5)
+    	###############################################################
 
         xyz = results["keypoints3d"]
         if NORMALIZE_3D_GT:
@@ -163,6 +251,7 @@ class HandDataset(Dataset):
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
+            "marker_heatmaps": marker_heatmaps
         }
 
         return data
