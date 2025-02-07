@@ -165,7 +165,13 @@ class HandDataset(Dataset):
         max_coord = points.max(axis=0)
         center = (max_coord + min_coord)/2
         scale = max_coord - min_coord
-                
+
+         # Store the original UV for training
+        original_uv = keypoints2d.copy()  # This remains unchanged for loss computation
+        original_uv[:, 0] /= IMAGE_SHAPE[0]
+        original_uv[:, 1] /= IMAGE_SHAPE[1]
+
+
         results = {
             "img": img,
             "keypoints2d": keypoints2d,
@@ -177,83 +183,81 @@ class HandDataset(Dataset):
             "K": K,
         }
         
-        # 1. Crop and Rot
+         # Apply augmentations
         results = self.bbox_center_jitter(results)
         results = self.get_random_scale_rotation(results)
-        # results = self.mesh_affine(results)
         results = self.mesh_perspective_trans(results)
-
-        # 2. 3D KP Root Relative
+    
+        # Compute root-relative 3D keypoints
         root_point = results['keypoints3d'][self.root_index].copy()
         results['keypoints3d'] = results['keypoints3d'] - root_point[None, :]
         results['vertices'] = results['vertices'] - root_point[None, :]
-        
+    
         hand_img_len = IMAGE_SHAPE[0]
         root_depth = root_point[2]
-
         hand_world_len = 0.2
         fx = results['K'][0][0]
         fy = results['K'][1][1]
         camare_relative_k = np.sqrt(fx * fy * (hand_world_len**2) / (hand_img_len**2))
         gamma = root_depth / camare_relative_k
-        # 3. Random Flip 
+    
+        # Further augmentations: flip, noise, brightness
         results = self.random_flip(results)
-        # 4. Image aug
         results = self.random_channel_noise(results)
         results['img'] = self.random_bright(image=results['img'])['image']
-
+    
         final_img = results['img']
         final_h, final_w = final_img.shape[:2]
-
-        trans_uv = results["keypoints2d"].copy()
-        trans_uv[:, 0] /= final_w
-        trans_uv[:, 1] /= final_h
-
-        trans_coord_valid = (trans_uv > 0).astype("float32") * (trans_uv < 1).astype("float32") # Nx2x21x2
+    
+        # --- For Marker Processing Only ---
+        # Create a separate copy for marker normalization.
+        uv_for_markers = results["keypoints2d"].copy()  # Start with the original UV
+        # Normalize using final image dimensions (only for marker generation)
+        uv_for_markers[:, 0] /= final_w
+        uv_for_markers[:, 1] /= final_h
+    
+        # Optionally compute a valid region on uv_for_markers if needed:
+        trans_coord_valid = (uv_for_markers > 0).astype("float32") * (uv_for_markers < 1).astype("float32")
         trans_coord_valid = trans_coord_valid[:, 0] * trans_coord_valid[:, 1]
-        trans_coord_valid *= coord_valid
-
-        #markers
-        ###############################################################
-
-        
+        trans_coord_valid *= coord_valid  # if required
+    
+        # Generate marker heatmaps using uv_for_markers
         fingertip_indices = [4, 8, 12, 16, 20]
-        fingertips_uv = trans_uv[fingertip_indices, :]  # Shape: [5, 2]
-
+        fingertips_uv = uv_for_markers[fingertip_indices, :]  # Only used for markers
         marker_heatmaps = []
         for uv in fingertips_uv:
             hm = self.generate_heatmap(final_h, final_w, uv, sigma=2)
             marker_heatmaps.append(hm)
-    
-        # Stack the heatmaps to form a multi-channel array: shape [5, H, W]
+
         marker_heatmaps = np.stack(marker_heatmaps, axis=0)
         marker_heatmaps = torch.from_numpy(marker_heatmaps).float()
-        debug_overlay = self.overlay_heatmaps_on_image(final_img, marker_heatmaps.numpy(), alpha=0.5)
-    	###############################################################
-
+        # Optionally, debug the overlay (commented out during training)
+        #debug_overlay = self.overlay_heatmaps_on_image(final_img, marker_heatmaps.numpy(), alpha=0.5)
+        # --- End Marker Processing ---
+    
         xyz = results["keypoints3d"]
         if NORMALIZE_3D_GT:
             joints_bone_len = np.sqrt(((xyz[0:1] - xyz[9:10])**2).sum(axis=-1, keepdims=True) + 1e-8)
-            xyz = xyz  / joints_bone_len
-        
+            xyz = xyz / joints_bone_len
+    
         xyz_valid = 1
-
         if trans_coord_valid[9] == 0 and trans_coord_valid[0] == 0:
             xyz_valid = 0
-
-        img = results['img']
-        img = np.transpose(img, (2,0,1))
+    
+        img_final = results['img']
+        img_final = np.transpose(img_final, (2, 0, 1))
+    
         data = {
-            "img": img,
-            "uv": results["keypoints2d"],
+            "img": img_final,
+            "uv": original_uv,  # Return the original UV for training!
             "xyz": xyz,
-            "vertices": results['vertices'],                
+            "vertices": results['vertices'],
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
             "marker_heatmaps": marker_heatmaps
         }
-
+    
         return data
 
 def build_train_loader(batch_size):
