@@ -41,7 +41,7 @@ _CONFIG = dict(
         DATASET_DIR='/home/fabian/simpleHand/data/myHAND/training/rgb/',
         JSON_DIR='dataset/train.json',
         NORMALIZE_3D_GT=False,
-        ROOT_INDEX=9,        
+        ROOT_INDEX=0,        
         AUG=dict(
             RandomChannelNoise=dict(noise_factor=0.4),
             RandomBrightnessContrastMap=dict(

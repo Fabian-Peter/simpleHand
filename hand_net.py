@@ -62,52 +62,58 @@ class HandNet(nn.Module):
         # ---------------------------
         # Add the marker branch.
         # We assume marker heatmaps have 5 channels.
+        # After initializing self.marker_branch...
         self.marker_branch = MarkerBranch(in_channels=5, out_channels=64)
-        
-        # Determine the number of channels in the RGB features.
-        # If your backbone exposes .num_features, use that; otherwise default to 1216 (from your cfg).
+
         if hasattr(self.backbone, "num_features"):
             self.rgb_feature_channels = self.backbone.num_features
         else:
             self.rgb_feature_channels = 1216
-        
-        # Fusion layer: combine RGB features and marker branch output.
-        # The fused feature has channels = (rgb_feature_channels + 64), which we project back to rgb_feature_channels.
-        self.fusion_conv = nn.Conv2d(self.rgb_feature_channels + 64, self.rgb_feature_channels, kernel_size=1)
+
+        # Add a projection layer to expand marker features to the same channel size as the RGB features.
+        self.marker_proj = nn.Conv2d(64, self.rgb_feature_channels, kernel_size=1)
+
+        # Instead of the concatenation-based fusion, use a learnable scalar for weighted addition:
+        self.marker_weight = nn.Parameter(torch.tensor(0.1))  # Start small.
+
+        # Optionally, add a BatchNorm for stabilization after fusion.
+        self.fusion_norm = nn.BatchNorm2d(self.rgb_feature_channels)
+
         # ---------------------------
     
     def infer(self, image, marker_heatmaps=None):
-        # Extract features from the RGB image.
+        # Extract RGB features from the backbone.
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
             features = features.permute(0, 3, 1, 2).contiguous()
         else:
             features = self.backbone.forward_features(image)
-        
-        # If marker heatmaps are provided, process and fuse them.
+    
+        # Process marker heatmaps if provided.
         if marker_heatmaps is not None:
-            # Downsample marker heatmaps from (e.g.) 224x224 to the spatial resolution of features (e.g., 7x7)
+            # Downsample marker heatmaps to match the spatial dimensions of features.
             marker_heatmaps_ds = F.adaptive_avg_pool2d(marker_heatmaps, (features.shape[2], features.shape[3]))
-            marker_features = self.marker_branch(marker_heatmaps_ds)  # Now marker_features will be [B, 64, H_feat, W_feat]
-            fused_features = torch.cat([features, marker_features], dim=1)
-            fused_features = self.fusion_conv(fused_features)
+            marker_features = self.marker_branch(marker_heatmaps_ds)  # Shape: [B, 64, H, W]
+            # Project marker features to match the RGB feature channels.
+            marker_features = self.marker_proj(marker_features)      # Now shape: [B, 1216, H, W]
+            # Apply the learnable scalar weight.
+            marker_features = self.marker_weight * marker_features
+            # Fuse by adding marker features to the RGB features.
+            fused_features = features + marker_features
+            # Optionally, apply normalization after fusion.
+            fused_features = self.fusion_norm(fused_features)
         else:
-            print("NONE")
             fused_features = features
-        
-        # Global feature for keypoint prediction.
+            print("else")
+    
         global_feature = self.avg_pool(fused_features).squeeze(-1).squeeze(-1)
         uv = self.keypoints_2d_head(global_feature)
-        # depth = self.depth_head(global_feature)  # (if using depth)
-        
-        # Use the (fused) features for mesh prediction.
         vertices = self.mesh_head(fused_features, uv)
         joints = mesh_to_joints(vertices)
 
         return {
             "uv": uv,
-            # "root_depth": depth,
             "joints": joints,
             "vertices": vertices,
         }
@@ -117,7 +123,7 @@ class HandNet(nn.Module):
         Forward pass. Expects:
             - image: Tensor of shape [B, 3, H, W]
             - marker_heatmaps (optional): Tensor of shape [B, 5, H, W]
-            - target: ground truth dictionary for training
+            - target: Ground truth dictionary for training.
         """
         image = image / 255 - 0.5
         output_dict = self.infer(image, marker_heatmaps=marker_heatmaps)
@@ -126,7 +132,6 @@ class HandNet(nn.Module):
             loss_dict = self._cal_single_hand_losses(output_dict, target)
             return loss_dict
         return output_dict
-
 
     def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict):
         uv_pred = pred_hand_dict['uv']
@@ -155,7 +160,6 @@ class HandNet(nn.Module):
         loss_dict['total_loss'] = total_loss
         
         return loss_dict
-
 
 if __name__ == "__main__":
     import pickle
