@@ -24,7 +24,7 @@ def remap_uv(feat: Tensor, uv_coord: Tensor) -> Tensor:
     select_feat = select_feat[:, :, :, 0]
     return select_feat
 
-
+#markers
 class MarkerBranch(nn.Module):
     def __init__(self, in_channels=5, out_channels=64):
         super(MarkerBranch, self).__init__()

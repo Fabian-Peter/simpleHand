@@ -79,6 +79,9 @@ def mesh_to_joints(mesh: torch.Tensor):
     joints = vertices2joints(J_reg, mesh)
     fingertips = get_fingertip(mesh)
     joints = remap_joints_and_fingertip(joints, fingertips)
+    #debug
+    if torch.isnan(joints).any():
+        raise ValueError("NaNs detected in mesh_to_joints conversion!")
     return joints        
 
 

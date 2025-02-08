@@ -296,6 +296,9 @@ def align_w_scale(mtx1, mtx2, return_trafo=False):
     mtx1_t = mtx1 - t1
     mtx2_t = mtx2 - t2
 
+    #print("mtx1_t stats:", np.nanmin(mtx1_t), np.nanmax(mtx1_t), np.nanmean(mtx1_t))
+    #print("mtx2_t stats:", np.nanmin(mtx2_t), np.nanmax(mtx2_t), np.nanmean(mtx2_t))
+
     # scale
     s1 = np.linalg.norm(mtx1_t) + 1e-8
     mtx1_t /= s1
@@ -433,6 +436,7 @@ def main(epoch, tta=False, postfix=""):
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
+        
         #visualizer
         aligned_pred = align_w_scale(gt_xyz, pred_xyz)
         #visualize_3d_keypoints(aligned_pred, gt_xyz)
