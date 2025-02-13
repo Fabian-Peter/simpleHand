@@ -87,7 +87,8 @@ class HandDataset(Dataset):
 
     def overlay_heatmaps_on_image(self, img, heatmaps, alpha=0.5):
         """
-        Overlays the provided heatmaps onto the image.
+        Overlays the provided heatmaps onto the image and writes the marker index numbers
+        at the centroid of each heatmap.
     
         Args:
             img (np.array): The original image (in BGR or RGB format; adjust accordingly).
@@ -95,19 +96,15 @@ class HandDataset(Dataset):
             alpha (float): The blending factor.
     
         Returns:
-            overlay (np.array): The image with heatmaps overlayed.
+            overlay (np.array): The image with heatmaps overlayed and marker indices written.
         """
-        # Combine the heatmaps; you can either sum them or take the maximum.
+        # First, combine all heatmaps to create a colored overlay.
         combined_heatmap = np.sum(heatmaps, axis=0)
         combined_heatmap = np.clip(combined_heatmap, 0, 1)
-    
-        # Convert combined heatmap to 8-bit (0-255)
         combined_heatmap = (combined_heatmap * 255).astype(np.uint8)
-    
-        # Apply a color map (e.g., COLORMAP_JET) to get a colored heatmap.
         colored_heatmap = cv2.applyColorMap(combined_heatmap, cv2.COLORMAP_JET)
     
-        # Make sure the image is in the same scale (0-255) and type.
+        # Prepare the original image for blending.
         if img.dtype != np.uint8:
             img_vis = (img * 255).astype(np.uint8)
         else:
@@ -115,20 +112,45 @@ class HandDataset(Dataset):
     
         # Blend the original image and the colored heatmap.
         overlay = cv2.addWeighted(img_vis, 1 - alpha, colored_heatmap, alpha, 0)
-       
-        # Create the folder if it doesn't exist.
+
+        N, H, W = heatmaps.shape
+        for i in range(N):
+            hm = heatmaps[i]
+            total = np.sum(hm)
+            if total > 1e-6:
+                x_coords, y_coords = np.meshgrid(np.arange(W), np.arange(H))
+                # Compute weighted average coordinates.
+                centroid_x = int(np.round(np.sum(x_coords * hm) / total))
+                centroid_y = int(np.round(np.sum(y_coords * hm) / total))
+            else:
+                # If the heatmap is all zeros, default to image center
+                centroid_x, centroid_y = W // 2, H // 2
+        
+            # Prepare text: 1 for thumb, 2 for index, etc.
+            text = str(i + 1)
+            # Choose font parameters.
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1.0
+            thickness = 2
+            text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
+            # Center the text at the centroid.
+            text_x = centroid_x - text_size[0] // 2
+            text_y = centroid_y + text_size[1] // 2
+        
+            # Overlay text on the combined overlay image (use white color).
+            #cv2.putText(overlay, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    
+        # Save the overlay image for debugging.
         overlay_folder = "overlayimages"
         if not os.path.exists(overlay_folder):
             os.makedirs(overlay_folder)
-
-        # Create a unique filename. For example, you might use a timestamp.
         import time
         filename = os.path.join(overlay_folder, f"debug_overlay_{int(time.time() * 1000)}.jpg")
         cv2.imwrite(filename, overlay)
         print(f"Debug overlay saved as {filename}")
-
-
+    
         return overlay
+
     
     def read_image(self, img_path):
         img = cv2.imread(img_path)
@@ -150,40 +172,36 @@ class HandDataset(Dataset):
         if img.ndim == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             
-
         uv_norm = keypoints2d.copy()
         uv_norm[:, 0] /= w   
         uv_norm[:, 1] /= h
 
-        coord_valid = (uv_norm > 0).astype("float32") * (uv_norm < 1).astype("float32") # Nx2x21x2
+        coord_valid = (uv_norm > 0).astype("float32") * (uv_norm < 1).astype("float32")
         coord_valid = coord_valid[:, 0] * coord_valid[:, 1]
 
         valid_points = [keypoints2d[i] for i in range(len(keypoints2d)) if coord_valid[i]==1]
-        
         points = np.array(valid_points)
         min_coord = points.min(axis=0)
         max_coord = points.max(axis=0)
         center = (max_coord + min_coord)/2
         scale = max_coord - min_coord
 
-         # Store the original UV for training
-        original_uv = keypoints2d.copy()  # This remains unchanged for loss computation
+        # Store the original UV for training
+        original_uv = keypoints2d.copy()
         original_uv[:, 0] /= IMAGE_SHAPE[0]
         original_uv[:, 1] /= IMAGE_SHAPE[1]
-
 
         results = {
             "img": img,
             "keypoints2d": keypoints2d,
             "keypoints3d": keypoints3d,
             "vertices": vertices,
-            
             "center": center,
             "scale": scale,
             "K": K,
         }
         
-         # Apply augmentations
+        # Apply augmentations
         results = self.bbox_center_jitter(results)
         results = self.get_random_scale_rotation(results)
         results = self.mesh_perspective_trans(results)
@@ -210,28 +228,42 @@ class HandDataset(Dataset):
         final_h, final_w = final_img.shape[:2]
     
         # --- For Marker Processing Only ---
-        # Create a separate copy for marker normalization.
-        uv_for_markers = results["keypoints2d"].copy()  # Start with the original UV
-        # Normalize using final image dimensions (only for marker generation)
+        # Create a copy for marker normalization using the augmented keypoints.
+        uv_for_markers = results["keypoints2d"].copy()
+        # Normalize using the final image dimensions
         uv_for_markers[:, 0] /= final_w
         uv_for_markers[:, 1] /= final_h
     
-        # Optionally compute a valid region on uv_for_markers if needed:
+        # Optionally, compute a valid region (this part remains unchanged)
         trans_coord_valid = (uv_for_markers > 0).astype("float32") * (uv_for_markers < 1).astype("float32")
         trans_coord_valid = trans_coord_valid[:, 0] * trans_coord_valid[:, 1]
-        trans_coord_valid *= coord_valid  # if required
-    
-        # Generate marker heatmaps using uv_for_markers
-        fingertip_indices = [4, 8, 12, 16, 20]
-        fingertips_uv = uv_for_markers[fingertip_indices, :]  # Only used for markers
-        marker_heatmaps = []
-        for uv in fingertips_uv:
-            hm = self.generate_heatmap(final_h, final_w, uv, sigma=2)
-            marker_heatmaps.append(hm)
+        trans_coord_valid *= coord_valid
 
+        # Generate marker heatmaps using uv_for_markers.
+        # Fingertip indices correspond to [4, 8, 12, 16, 20].
+        fingertip_indices = [4, 8, 12, 16, 20]
+        fingertips_uv = uv_for_markers[fingertip_indices, :]  # shape: [5, 2]
+        
+        # Retrieve marker visibility information from the JSON.
+        # If not provided, assume all markers are visible.
+        if "marker_visibility" in data_info:
+            marker_visibility = np.array(data_info["marker_visibility"], dtype=np.float32)
+        else:
+            marker_visibility = np.ones(5, dtype=np.float32)
+            print("key not found")
+        
+        marker_heatmaps = []
+        # Loop over each marker (fingertip)
+        for i, uv in enumerate(fingertips_uv):
+            if marker_visibility[i] == 1:
+                hm = self.generate_heatmap(final_h, final_w, uv, sigma=2)
+            else:
+                hm = np.zeros((final_h, final_w), dtype=np.float32)
+            marker_heatmaps.append(hm)
+        
         marker_heatmaps = np.stack(marker_heatmaps, axis=0)
         marker_heatmaps = torch.from_numpy(marker_heatmaps).float()
-        # Optionally, debug the overlay (commented out during training)
+        #debug
         #debug_overlay = self.overlay_heatmaps_on_image(final_img, marker_heatmaps.numpy(), alpha=0.5)
         # --- End Marker Processing ---
     
@@ -251,7 +283,7 @@ class HandDataset(Dataset):
             "img": img_final,
             "uv": original_uv,  # Return the original UV for training!
             "xyz": xyz,
-            "vertices": results['vertices'],
+            "vertices": results['vertices'],                
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,

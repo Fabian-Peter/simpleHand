@@ -43,50 +43,67 @@ class HandNet(nn.Module):
             block_types.append(block_map[name])
         mesh_head_cfg['block_types'] = block_types
         self.mesh_head = MeshHead(**mesh_head_cfg)
-        
-        # Marker branch and fusion (gated fusion variant)
+        #markers
+        # ---------------------------
+        # gated fusion variant
         self.marker_branch = MarkerBranch(in_channels=5, out_channels=64)
         if hasattr(self.backbone, "num_features"):
             self.rgb_feature_channels = self.backbone.num_features
         else:
             self.rgb_feature_channels = 1216
         
-        # Project marker features to match RGB feature channels.
+        # Project marker features
         self.marker_proj = nn.Conv2d(64, self.rgb_feature_channels, kernel_size=1)
-        # Learnable gating parameter (could be a scalar or per-channel)
-        self.marker_gate = nn.Parameter(torch.tensor(0.1))
-        # Optional fusion normalization
+        self.marker_weight = nn.Parameter(torch.tensor(0.01))
+        #normalization
         self.fusion_norm = nn.BatchNorm2d(self.rgb_feature_channels)
         # ---------------------------
     
     def infer(self, image, marker_heatmaps=None):
+        # Extract RGB features from the backbone.
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1].permute(0, 3, 1, 2).contiguous()
         else:
             features = self.backbone.forward_features(image)
-        
-        # Fuse marker features if provided.
+    
+        # Process marker heatmaps if provided.
         if marker_heatmaps is not None:
+            # Downsample marker heatmaps to match the spatial resolution of features.
             marker_heatmaps_ds = F.adaptive_avg_pool2d(marker_heatmaps, (features.shape[2], features.shape[3]))
-            marker_features = self.marker_branch(marker_heatmaps_ds)  # [B, 64, H_feat, W_feat]
-            marker_features = self.marker_proj(marker_features)         # [B, rgb_feature_channels, H_feat, W_feat]
-            # Use a gating mechanism to blend marker features:
-            fused_features = features + self.marker_gate * marker_features
+            # Obtain marker branch output.
+            marker_features = self.marker_branch(marker_heatmaps_ds)  # shape: [B, 64, H, W]
+            # Project marker features to match the RGB feature channels.
+            marker_features = self.marker_proj(marker_features)         # shape: [B, rgb_feature_channels, H, W]
+            # Optionally check for non-finite values here.
+            if not torch.isfinite(marker_features).all():
+                print("Non-finite marker_features detected!")
+            # Scale the marker features by the learnable weight.
+            marker_features = torch.clamp(marker_features, min=-10.0, max=10.0)
+            marker_features = self.marker_weight * marker_features
+            # Fuse the marker features with the RGB features (elementwise addition).
+            
+            fused_features = features + marker_features
+            # Apply a normalization layer after fusion.
             fused_features = self.fusion_norm(fused_features)
         else:
             fused_features = features
-        
+    
+        # Optionally, you can log statistics:
+        if not torch.isfinite(fused_features).all():
+            print("Non-finite fused_features detected!")
+    
+        # Global feature for keypoint prediction.
         global_feature = self.avg_pool(fused_features).squeeze(-1).squeeze(-1)
         uv = self.keypoints_2d_head(global_feature)
         vertices = self.mesh_head(fused_features, uv)
+    
+        # Debug: check vertices for NaNs before converting to joints.
+        if not torch.isfinite(vertices).all():
+            print("Non-finite vertices detected! Stats: min =", torch.min(vertices), "max =", torch.max(vertices), "mean =", torch.mean(vertices))
+    
         joints = mesh_to_joints(vertices)
-
-        return {
-            "uv": uv,
-            "joints": joints,
-            "vertices": vertices,
-        }
+        return {"uv": uv, "joints": joints, "vertices": vertices}
     
     def forward(self, image, target=None, marker_heatmaps=None):
         image = image / 255 - 0.5
