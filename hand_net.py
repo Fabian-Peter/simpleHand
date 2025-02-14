@@ -193,6 +193,98 @@ def visualize_uv_keypoints(image, uv, save_path='./debug_img/uv_keypoints.png'):
     print(f"UV keypoints visualization saved to: {save_path}")
 
 #-------------
+
+def visualize_predicted_vertices(vertices, save_path='./debug_img/vertices.png'):
+    """
+    Visualize predicted vertices in a 3D scatter plot.
+    
+    Args:
+        vertices (torch.Tensor or np.ndarray): Predicted vertices of shape [N, 3] for one image.
+        save_path (str): Path where to save the visualization.
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # Ensures 3D plotting is enabled
+    import os
+
+    # Convert to numpy if needed
+    if isinstance(vertices, torch.Tensor):
+        vertices = vertices.detach().cpu().numpy()
+    
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # Create a 3D scatter plot
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    ax.scatter(vertices[:, 0], vertices[:, 1], vertices[:, 2],
+               c='r', marker='o', s=20, label='Vertices')
+    
+    ax.set_title("Predicted Vertices")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Predicted vertices visualization saved to: {save_path}")
+
+def visualize_predicted_joints(joints, save_path='./debug_img/joints.png'):
+    """
+    Visualize predicted joints in a 3D scatter plot along with skeleton connections.
+    
+    Args:
+        joints (torch.Tensor or np.ndarray): Predicted joints for one image with shape [21, 3].
+        save_path (str): Path where to save the visualization.
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
+    import os
+
+    # Convert joints to numpy if needed.
+    if isinstance(joints, torch.Tensor):
+        joints = joints.detach().cpu().numpy()
+
+    # Create the debug directory if it doesn't exist.
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    # Create a 3D scatter plot.
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot joints as blue scatter points.
+    ax.scatter(joints[:, 0], joints[:, 1], joints[:, 2],
+               c='b', marker='o', s=30, label='Joints')
+    
+    # Define hand skeleton connections (same as in your 2D keypoints).
+    skeleton = [
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        (0, 5), (5, 6), (6, 7), (7, 8),
+        (0, 9), (9, 10), (10, 11), (11, 12),
+        (0, 13), (13, 14), (14, 15), (15, 16),
+        (0, 17), (17, 18), (18, 19), (19, 20)
+    ]
+    # Draw lines for each connection.
+    for start, end in skeleton:
+        xs = [joints[start, 0], joints[end, 0]]
+        ys = [joints[start, 1], joints[end, 1]]
+        zs = [joints[start, 2], joints[end, 2]]
+        ax.plot(xs, ys, zs, c='r', linewidth=2)
+    
+    ax.set_title("Predicted Joints")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Predicted joints visualization saved to: {save_path}")
+
+
 class HandNet(nn.Module):
     def __init__(self, cfg, pretrained=None):
         super().__init__()
@@ -263,7 +355,14 @@ class HandNet(nn.Module):
         #visualize_uv_keypoints(image[0], uv[0], save_path='./debug_img/uv_keypoints.png')
         #-------------
         vertices = self.mesh_head(features, uv)
+
+        #debug predicted vertices
+        #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
+
+
         joints = mesh_to_joints(vertices)
+        #debug
+        visualize_predicted_joints(joints[0], save_path='./debug_img/joints.png')
 
         return {
             "uv": uv,
