@@ -134,31 +134,39 @@ def visualize_global_feature_vector(global_feature, save_path='./debug_img/globa
 
 #-------------
 #debug uv keypoint visualization
-def visualize_uv_keypoints(image, uv, save_path='./debug_img/uv_keypoints.png'):
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+def visualize_uv_keypoints(image, uv_pred, uv_gt, save_path='./debug_img/uv_keypoints.png'):
     """
-    Overlay predicted uv keypoints on the cropped and resized image.
+    Overlay both predicted and ground truth UV keypoints on the image with skeleton lines.
     
     Args:
         image (torch.Tensor or np.ndarray): Cropped image in shape [C, H, W] in range [0,1].
-        uv (torch.Tensor or np.ndarray): Keypoints tensor, shape [N, 2].
+        uv_pred (torch.Tensor or np.ndarray): Predicted keypoints, shape [N, 2] (normalized).
+        uv_gt (torch.Tensor or np.ndarray): Ground truth keypoints, shape [N, 2] (normalized).
         save_path (str): Path to save the visualization.
     """
-    if isinstance(image, torch.Tensor):
+    # Convert image to numpy (H, W, C)
+    if hasattr(image, 'detach'):
         image_np = image.detach().cpu().permute(1, 2, 0).numpy()
     else:
         image_np = image
 
     H, W, _ = image_np.shape
 
-    # Convert uv to numpy array and reshape if needed
-    if isinstance(uv, torch.Tensor):
-        uv = uv.detach().cpu().view(-1, 2).numpy()
+    # Convert keypoints to numpy arrays and reshape if needed
+    if hasattr(uv_pred, 'detach'):
+        uv_pred = uv_pred.detach().cpu().view(-1, 2).numpy()
+    if hasattr(uv_gt, 'detach'):
+        uv_gt = uv_gt.detach().cpu().view(-1, 2).numpy()
 
     # Scale UV coordinates from normalized [0, 1] to pixel space [0, W] and [0, H]
-    uv_pixel = uv * np.array([W, H])
+    uv_pred_pixel = uv_pred * np.array([W, H])
+    uv_gt_pixel = uv_gt * np.array([W, H])
 
     # Define the hand skeleton as connections (edges) between keypoint indices.
-    # Note: 0 is the wrist.
     skeleton = [
         # Thumb: wrist -> 1 -> 2 -> 3 -> 4
         (0, 1), (1, 2), (2, 3), (3, 4),
@@ -174,18 +182,29 @@ def visualize_uv_keypoints(image, uv, save_path='./debug_img/uv_keypoints.png'):
 
     plt.figure(figsize=(8, 8))
     plt.imshow(image_np)
-
-    # Draw skeleton lines
+    
+    # Draw ground truth skeleton in green
     for edge in skeleton:
         pt1, pt2 = edge
-        x_vals = [uv_pixel[pt1, 0], uv_pixel[pt2, 0]]
-        y_vals = [uv_pixel[pt1, 1], uv_pixel[pt2, 1]]
-        plt.plot(x_vals, y_vals, 'b-', linewidth=2)  # Blue lines
+        x_vals = [uv_gt_pixel[pt1, 0], uv_gt_pixel[pt2, 0]]
+        y_vals = [uv_gt_pixel[pt1, 1], uv_gt_pixel[pt2, 1]]
+        plt.plot(x_vals, y_vals, 'g-', linewidth=2)
+    
+    # Draw predicted skeleton in red
+    for edge in skeleton:
+        pt1, pt2 = edge
+        x_vals = [uv_pred_pixel[pt1, 0], uv_pred_pixel[pt2, 0]]
+        y_vals = [uv_pred_pixel[pt1, 1], uv_pred_pixel[pt2, 1]]
+        plt.plot(x_vals, y_vals, 'r-', linewidth=2)
+    
+    # Overlay ground truth keypoints with green circles
+    plt.scatter(uv_gt_pixel[:, 0], uv_gt_pixel[:, 1], s=100, c='green', marker='o', label='Ground Truth')
+    # Overlay predicted keypoints with red crosses
+    plt.scatter(uv_pred_pixel[:, 0], uv_pred_pixel[:, 1], s=100, c='red', marker='x', label='Predicted')
 
-    # Overlay keypoints
-    plt.scatter(uv_pixel[:, 0], uv_pixel[:, 1], s=100, c='red', marker='o')
-    plt.title("Predicted 2D Keypoints with Hand Skeleton")
+    plt.title("Predicted vs Ground Truth 2D Keypoints with Hand Skeleton")
     plt.axis('off')
+    plt.legend()
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -330,7 +349,7 @@ class HandNet(nn.Module):
         
 
 
-    def infer(self, image):
+    def infer(self, image, gt_uv=None):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -352,7 +371,7 @@ class HandNet(nn.Module):
         # depth = self.depth_head(global_feature)
         #-------------
         #debug predicted uv keypoints     
-        #visualize_uv_keypoints(image[0], uv[0], save_path='./debug_img/uv_keypoints.png')
+        #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
         #-------------
         vertices = self.mesh_head(features, uv)
 
@@ -362,7 +381,7 @@ class HandNet(nn.Module):
 
         joints = mesh_to_joints(vertices)
         #debug
-        visualize_predicted_joints(joints[0], save_path='./debug_img/joints.png')
+        #visualize_predicted_joints(joints[0], save_path='./debug_img/joints.png')
 
         return {
             "uv": uv,
@@ -390,7 +409,7 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-        output_dict = self.infer(image)
+        output_dict = self.infer(image, gt_uv=target["uv"])
         if self.training:
             assert target is not None
             loss_dict = self._cal_single_hand_losses(output_dict, target)
