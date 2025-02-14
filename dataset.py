@@ -11,7 +11,7 @@ from cfg import _CONFIG
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 from transforms import GetRandomScaleRotation, MeshAffine, RandomHorizontalFlip, \
             get_points_center_scale, RandomChannelNoise, BBoxCenterJitter, MeshPerspectiveTransform
-
+import torch
 
 DATA_CFG = _CONFIG["DATA"]
 IMAGE_SHAPE: List = DATA_CFG["IMAGE_SHAPE"][:2]

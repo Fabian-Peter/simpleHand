@@ -10,7 +10,188 @@ from models.modules import MeshHead, AttentionBlock, IdentityBlock, SepConvBlock
 from models.losses import mesh_to_joints
 from models.losses import l1_loss
 
+import matplotlib.pyplot as plt
+import numpy as np
+import os
 
+#-------------
+#debug backbone feature extraction map display  
+def visualize_feature_maps(features, num_channels_to_show=16, figsize=(15, 8), save_path='./debug_img/feature_maps.png'):
+    """
+    Visualize feature maps from the backbone network and save to file
+    
+    Args:
+        features (torch.Tensor): Feature maps tensor of shape (B, C, H, W)
+        num_channels_to_show (int): Number of channels to display
+        figsize (tuple): Figure size for matplotlib
+        save_path (str): Path to save the visualization
+    """
+    print(f"Starting feature map visualization...")
+    print(f"Feature tensor shape: {features.shape}")
+
+    # Create debug_img directory if it doesn't exist
+    save_dir = os.path.dirname(save_path)
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Created/verified directory: {save_dir}")
+
+    # Convert features to numpy and take first batch
+    if isinstance(features, torch.Tensor):
+        features = features.detach().cpu().numpy()
+        print("Converted features to numpy array")
+
+    if len(features.shape) == 4:
+        features = features[0]  # Take first batch
+        print(f"Selected first batch, shape now: {features.shape}")
+
+    # Select subset of channels to display
+    num_channels = min(num_channels_to_show, features.shape[0])
+    selected_channels = features[:num_channels]
+    print(f"Selected {num_channels} channels for visualization")
+
+    # Calculate grid dimensions
+    grid_size = int(np.ceil(np.sqrt(num_channels)))
+    print(f"Grid size: {grid_size}x{grid_size}")
+
+    try:
+        # Create figure
+        fig, axes = plt.subplots(grid_size, grid_size, figsize=figsize)
+        fig.suptitle('Feature Maps from Backbone', fontsize=16)
+
+        # Normalize each feature map independently
+        for idx, feature_map in enumerate(selected_channels):
+            if idx >= num_channels:
+                break
+
+            row = idx // grid_size
+            col = idx % grid_size
+
+            # Normalize feature map
+            feature_map = feature_map - feature_map.min()
+            feature_map = feature_map / (feature_map.max() + 1e-8)
+
+            # Plot
+            if grid_size == 1:
+                axes.imshow(feature_map, cmap='viridis')
+                axes.axis('off')
+                axes.set_title(f'Channel {idx}')
+            else:
+                if isinstance(axes, np.ndarray):
+                    axes[row, col].imshow(feature_map, cmap='viridis')
+                    axes[row, col].axis('off')
+                    axes[row, col].set_title(f'Channel {idx}')
+                else:
+                    axes.imshow(feature_map, cmap='viridis')
+                    axes.axis('off')
+                    axes.set_title(f'Channel {idx}')
+
+        # Turn off remaining empty subplots
+        if grid_size > 1 and isinstance(axes, np.ndarray):
+            for idx in range(num_channels, grid_size * grid_size):
+                row = idx // grid_size
+                col = idx % grid_size
+                axes[row, col].axis('off')
+
+        plt.tight_layout()
+
+        # Save the figure
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Successfully saved feature maps to: {save_path}")
+        plt.close()  # Close the figure to free memory
+
+        return save_path
+
+    except Exception as e:
+        print(f"Error during visualization: {str(e)}")
+        raise
+#-------------
+
+def visualize_global_feature_vector(global_feature, save_path='./debug_img/global_feature.png'):
+    """
+    Visualize a global feature vector.
+    Args:
+        global_feature (torch.Tensor): Tensor of shape [D] (for one image)
+        save_path (str): Path where to save the plot
+    """
+    import matplotlib.pyplot as plt
+    import os
+
+    # Convert to numpy
+    global_feature_np = global_feature.detach().cpu().numpy()
+
+    # Create the debug_img directory if it doesn't exist
+    save_dir = os.path.dirname(save_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    plt.figure(figsize=(15, 5))
+    plt.plot(global_feature_np, marker='o', linestyle='-', markersize=2)
+    plt.title("Global Feature Vector")
+    plt.xlabel("Dimension")
+    plt.ylabel("Activation")
+    plt.grid(True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Global feature vector saved to: {save_path}")
+
+#-------------
+def visualize_uv_keypoints(image, uv, save_path='./debug_img/uv_keypoints.png'):
+    """
+    Overlay predicted uv keypoints on the cropped and resized image.
+    
+    Args:
+        image (torch.Tensor or np.ndarray): Cropped image in shape [C, H, W] in range [0,1].
+        uv (torch.Tensor or np.ndarray): Keypoints tensor, shape [N, 2].
+        save_path (str): Path to save the visualization.
+    """
+    if isinstance(image, torch.Tensor):
+        image_np = image.detach().cpu().permute(1, 2, 0).numpy()
+    else:
+        image_np = image
+
+    H, W, _ = image_np.shape
+
+    # Convert uv to numpy array and reshape if needed
+    if isinstance(uv, torch.Tensor):
+        uv = uv.detach().cpu().view(-1, 2).numpy()
+
+    # Scale UV coordinates from normalized [0, 1] to pixel space [0, W] and [0, H]
+    uv_pixel = uv * np.array([W, H])
+
+    # Define the hand skeleton as connections (edges) between keypoint indices.
+    # Note: 0 is the wrist.
+    skeleton = [
+        # Thumb: wrist -> 1 -> 2 -> 3 -> 4
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        # Index finger: wrist -> 5 -> 6 -> 7 -> 8
+        (0, 5), (5, 6), (6, 7), (7, 8),
+        # Middle finger: wrist -> 9 -> 10 -> 11 -> 12
+        (0, 9), (9, 10), (10, 11), (11, 12),
+        # Ring finger: wrist -> 13 -> 14 -> 15 -> 16
+        (0, 13), (13, 14), (14, 15), (15, 16),
+        # Little finger: wrist -> 17 -> 18 -> 19 -> 20
+        (0, 17), (17, 18), (18, 19), (19, 20)
+    ]
+
+    plt.figure(figsize=(8, 8))
+    plt.imshow(image_np)
+
+    # Draw skeleton lines
+    for edge in skeleton:
+        pt1, pt2 = edge
+        x_vals = [uv_pixel[pt1, 0], uv_pixel[pt2, 0]]
+        y_vals = [uv_pixel[pt1, 1], uv_pixel[pt2, 1]]
+        plt.plot(x_vals, y_vals, 'b-', linewidth=2)  # Blue lines
+
+    # Overlay keypoints
+    plt.scatter(uv_pixel[:, 0], uv_pixel[:, 1], s=100, c='red', marker='o')
+    plt.title("Predicted 2D Keypoints with Hand Skeleton")
+    plt.axis('off')
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"UV keypoints visualization saved to: {save_path}")
+
+#-------------
 class HandNet(nn.Module):
     def __init__(self, cfg, pretrained=None):
         super().__init__()
@@ -64,10 +245,22 @@ class HandNet(nn.Module):
         else:
             features = self.backbone.forward_features(image)
         
+        #-------------
+        #debug backbone feature extraction map display    
+        #save_path = './debug_img/feature_maps.png'
+        #visualize_feature_maps(features, save_path=save_path)
+        #-------------
         global_feature = self.avg_pool(features).squeeze(-1).squeeze(-1)
+        #-------------
+        #debug global feature vector
+        #visualize_global_feature_vector(global_feature[0], save_path='./debug_img/global_feature.png')
+        #-------------
         uv = self.keypoints_2d_head(global_feature)     
         # depth = self.depth_head(global_feature)
-        
+        #-------------
+        #debug predicted uv keypoints     
+        visualize_uv_keypoints(image[0], uv[0], save_path='./debug_img/uv_keypoints.png')
+        #-------------
         vertices = self.mesh_head(features, uv)
         joints = mesh_to_joints(vertices)
 
