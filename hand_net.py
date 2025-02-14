@@ -104,7 +104,7 @@ def visualize_feature_maps(features, num_channels_to_show=16, figsize=(15, 8), s
         print(f"Error during visualization: {str(e)}")
         raise
 #-------------
-
+#debug global feature vector map display  
 def visualize_global_feature_vector(global_feature, save_path='./debug_img/global_feature.png'):
     """
     Visualize a global feature vector.
@@ -133,6 +133,7 @@ def visualize_global_feature_vector(global_feature, save_path='./debug_img/globa
     print(f"Global feature vector saved to: {save_path}")
 
 #-------------
+#debug uv keypoint visualization
 def visualize_uv_keypoints(image, uv, save_path='./debug_img/uv_keypoints.png'):
     """
     Overlay predicted uv keypoints on the cropped and resized image.
@@ -259,7 +260,7 @@ class HandNet(nn.Module):
         # depth = self.depth_head(global_feature)
         #-------------
         #debug predicted uv keypoints     
-        visualize_uv_keypoints(image[0], uv[0], save_path='./debug_img/uv_keypoints.png')
+        #visualize_uv_keypoints(image[0], uv[0], save_path='./debug_img/uv_keypoints.png')
         #-------------
         vertices = self.mesh_head(features, uv)
         joints = mesh_to_joints(vertices)
