@@ -399,7 +399,7 @@ class HandNet(nn.Module):
         # depth = self.depth_head(global_feature)
         #-------------
         #debug predicted uv keypoints     
-        #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
+        visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
         #-------------
         vertices = self.mesh_head(features, uv)
 
@@ -409,7 +409,7 @@ class HandNet(nn.Module):
 
         joints = mesh_to_joints(vertices)
         #debug
-        #visualize_joints_comparison(joints_pred[0], gt_xyz=gt_joints[0], save_path='./debug_img/joints_comparison.png')
+        #visualize_joints_comparison(joints[0], joints_gt=gt_joints[0], save_path='./debug_img/joints_comparison.png')
 
         return {
             "uv": uv,
