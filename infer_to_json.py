@@ -346,7 +346,7 @@ def infer_single_json(val_cfg, bmk, model, rot_angle=0):
         trans_matrix_3d_inv = torch.linalg.inv(trans_matrix_3d)
         
         with torch.no_grad():
-            res = model(image)
+            res = model(image, target = batch_data)
             joints = res["joints"]
             uv = res["uv"]
             vertices = res['vertices']

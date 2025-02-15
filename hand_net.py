@@ -213,123 +213,149 @@ def visualize_uv_keypoints(image, uv_pred, uv_gt, save_path='./debug_img/uv_keyp
 
 #-------------
 
-def visualize_joints_comparison(joints_pred, joints_gt, save_path='./debug_img/joints_comparison.png'):
+def visualize_hand_predictions(pred_coords, gt_coords, root_index=0, debug=False):
     """
-    Visualize predicted vs ground truth joints in a 3D scatter plot with skeleton lines.
+    Visualize and compare predicted and ground truth hand coordinates.
+    Additionally, adjust the predicted values for certain joints (indexes 4, 8, 12, 16, 20)
+    by replacing them with the ground truth values (in root-relative coordinates).
+    Finally, undo the root-relative transformation and return the adjusted predicted values.
     
     Args:
-        joints_pred (torch.Tensor or np.ndarray): Predicted joints for one image, shape [21, 3].
-        joints_gt (torch.Tensor or np.ndarray): Ground truth joints for one image, shape [21, 3].
-        save_path (str): Path where to save the visualization.
+        pred_coords (np.ndarray or torch.Tensor): Shape (N, 3) array of predicted 3D coordinates in absolute space.
+        gt_coords (np.ndarray or torch.Tensor): Shape (N, 3) array of ground truth 3D coordinates in absolute space.
+        root_index (int): Index of the root joint for making coordinates root-relative.
+        debug (bool): If True, generate debug plots.
+        
+    Returns:
+        torch.Tensor: Adjusted predicted 3D coordinates in absolute space.
     """
+    import torch
+    import numpy as np
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
-    import os
 
-    # Convert to numpy arrays if necessary
-    if isinstance(joints_pred, torch.Tensor):
-        joints_pred = joints_pred.detach().cpu().numpy()
-    if isinstance(joints_gt, torch.Tensor):
-        joints_gt = joints_gt.detach().cpu().numpy()
+    # Save device if the inputs are tensors.
+    device = torch.device("cpu")
+    if isinstance(pred_coords, torch.Tensor):
+        device = pred_coords.device
+        pred_coords = pred_coords.detach().cpu().numpy()
+    if isinstance(gt_coords, torch.Tensor):
+        gt_coords = gt_coords.detach().cpu().numpy()
 
-    # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    # Create a 3D figure
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Plot predicted joints (red crosses) and ground truth joints (green circles)
-    ax.scatter(joints_pred[:, 0], joints_pred[:, 1], joints_pred[:, 2],
-               c='r', marker='x', s=50, label='Predicted')
-    ax.scatter(joints_gt[:, 0], joints_gt[:, 1], joints_gt[:, 2],
-               c='g', marker='o', s=50, label='Ground Truth')
-
-    # Define the hand skeleton connections (the same as in your 2D keypoint visualization)
+    # Define skeleton connections (example for a 21-joint hand model)
     skeleton = [
-        (0, 1), (1, 2), (2, 3), (3, 4),
-        (0, 5), (5, 6), (6, 7), (7, 8),
-        (0, 9), (9, 10), (10, 11), (11, 12),
-        (0, 13), (13, 14), (14, 15), (15, 16),
-        (0, 17), (17, 18), (18, 19), (19, 20)
+        (0, 1), (1, 2), (2, 3), (3, 4),    # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),     # Index
+        (0, 9), (9, 10), (10, 11), (11, 12), # Middle
+        (0, 13), (13, 14), (14, 15), (15, 16),# Ring
+        (0, 17), (17, 18), (18, 19), (19, 20) # Pinky
     ]
-    
-    # Draw skeleton lines for predicted joints in red
-    for (i, j) in skeleton:
-        ax.plot([joints_pred[i, 0], joints_pred[j, 0]],
-                [joints_pred[i, 1], joints_pred[j, 1]],
-                [joints_pred[i, 2], joints_pred[j, 2]],
-                c='r', linewidth=2, alpha=0.5)
-    
-    # Draw skeleton lines for ground truth joints in green
-    for (i, j) in skeleton:
-        ax.plot([joints_gt[i, 0], joints_gt[j, 0]],
-                [joints_gt[i, 1], joints_gt[j, 1]],
-                [joints_gt[i, 2], joints_gt[j, 2]],
-                c='g', linewidth=2, alpha=0.5)
 
-    ax.set_title("Predicted vs Ground Truth Joints")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
-    print(f"Predicted vs Ground Truth joints visualization saved to: {save_path}")
+    # Convert to root-relative coordinates.
+    pred_root = pred_coords[root_index]
+    gt_root = gt_coords[root_index]
+    pred_rel = pred_coords - pred_root  # Predicted in root-relative space.
+    gt_rel = gt_coords - gt_root        # Ground truth in root-relative space.
 
-def visualize_predicted_joints(joints, save_path='./debug_img/joints.png'):
-    """
-    Visualize predicted joints in a 3D scatter plot along with skeleton connections.
-    
-    Args:
-        joints (torch.Tensor or np.ndarray): Predicted joints for one image with shape [21, 3].
-        save_path (str): Path where to save the visualization.
-    """
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
-    import os
+    # Optional debug plot for original root-relative predictions.
+    if debug:
+        error_original = np.linalg.norm(pred_rel - gt_rel, axis=1)
+        mean_error_original = np.mean(error_original)
+        max_error_original = np.max(error_original)
 
-    # Convert joints to numpy if needed.
-    if isinstance(joints, torch.Tensor):
-        joints = joints.detach().cpu().numpy()
+        fig1 = plt.figure(figsize=(12, 6))
+        ax1 = fig1.add_subplot(121, projection='3d')
+        ax1.scatter(pred_rel[:, 0], pred_rel[:, 1], pred_rel[:, 2],
+                    c='r', marker='x', s=50, label='Predictions')
+        for start, end in skeleton:
+            ax1.plot([pred_rel[start, 0], pred_rel[end, 0]],
+                     [pred_rel[start, 1], pred_rel[end, 1]],
+                     [pred_rel[start, 2], pred_rel[end, 2]],
+                     c='r', linestyle='--', linewidth=2)
+        ax1.scatter(gt_rel[:, 0], gt_rel[:, 1], gt_rel[:, 2],
+                    c='g', marker='o', s=50, label='Ground Truth')
+        for start, end in skeleton:
+            ax1.plot([gt_rel[start, 0], gt_rel[end, 0]],
+                     [gt_rel[start, 1], gt_rel[end, 1]],
+                     [gt_rel[start, 2], gt_rel[end, 2]],
+                     c='g', linestyle='-', linewidth=2)
+        ax1.set_title("Original Root-Relative Predictions\n"
+                      "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_original, max_error_original))
+        ax1.set_xlabel("X")
+        ax1.set_ylabel("Y")
+        ax1.set_zlabel("Z")
+        ax1.legend()
 
-    # Create the debug directory if it doesn't exist.
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # ---------------------------
+    # Adjust predictions: Replace specified joints in the predicted values with ground truth values.
+    adjust_idxs = [4, 8, 12, 16, 20]
+    adjusted_rel = pred_rel.copy()
+    for idx in adjust_idxs:
+        adjusted_rel[idx] = gt_rel[idx]
 
-    # Create a 3D scatter plot.
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # Plot joints as blue scatter points.
-    ax.scatter(joints[:, 0], joints[:, 1], joints[:, 2],
-               c='b', marker='o', s=30, label='Joints')
-    
-    # Define hand skeleton connections (same as in your 2D keypoints).
-    skeleton = [
-        (0, 1), (1, 2), (2, 3), (3, 4),
-        (0, 5), (5, 6), (6, 7), (7, 8),
-        (0, 9), (9, 10), (10, 11), (11, 12),
-        (0, 13), (13, 14), (14, 15), (15, 16),
-        (0, 17), (17, 18), (18, 19), (19, 20)
-    ]
-    # Draw lines for each connection.
-    for start, end in skeleton:
-        xs = [joints[start, 0], joints[end, 0]]
-        ys = [joints[start, 1], joints[end, 1]]
-        zs = [joints[start, 2], joints[end, 2]]
-        ax.plot(xs, ys, zs, c='r', linewidth=2)
-    
-    ax.set_title("Predicted Joints")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.legend()
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
-    print(f"Predicted joints visualization saved to: {save_path}")
+    if debug:
+        error_adjusted = np.linalg.norm(adjusted_rel - gt_rel, axis=1)
+        mean_error_adjusted = np.mean(error_adjusted)
+        max_error_adjusted = np.max(error_adjusted)
+
+        ax2 = fig1.add_subplot(122, projection='3d')
+        ax2.scatter(adjusted_rel[:, 0], adjusted_rel[:, 1], adjusted_rel[:, 2],
+                    c='r', marker='x', s=50, label='Adjusted Predictions')
+        for start, end in skeleton:
+            ax2.plot([adjusted_rel[start, 0], adjusted_rel[end, 0]],
+                     [adjusted_rel[start, 1], adjusted_rel[end, 1]],
+                     [adjusted_rel[start, 2], adjusted_rel[end, 2]],
+                     c='r', linestyle='--', linewidth=2)
+        ax2.scatter(gt_rel[:, 0], gt_rel[:, 1], gt_rel[:, 2],
+                    c='g', marker='o', s=50, label='Ground Truth')
+        for start, end in skeleton:
+            ax2.plot([gt_rel[start, 0], gt_rel[end, 0]],
+                     [gt_rel[start, 1], gt_rel[end, 1]],
+                     [gt_rel[start, 2], gt_rel[end, 2]],
+                     c='g', linestyle='-', linewidth=2)
+        ax2.set_title("Adjusted Root-Relative Predictions\n"
+                      "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_adjusted, max_error_adjusted))
+        ax2.set_xlabel("X")
+        ax2.set_ylabel("Y")
+        ax2.set_zlabel("Z")
+        ax2.legend()
+        plt.tight_layout()
+        plt.show()
+
+    # ---------------------------
+    # Undo the root-relative transformation by adding back the predicted root.
+    adjusted_pred_abs = adjusted_rel + pred_root
+
+    # Optional debug plot for absolute coordinates.
+    if debug:
+        gt_abs = gt_rel + gt_root
+        fig2 = plt.figure(figsize=(8, 6))
+        ax3 = fig2.add_subplot(111, projection='3d')
+        ax3.scatter(adjusted_pred_abs[:, 0], adjusted_pred_abs[:, 1], adjusted_pred_abs[:, 2],
+                    c='r', marker='x', s=50, label='Adjusted Predictions (Absolute)')
+        for start, end in skeleton:
+            ax3.plot([adjusted_pred_abs[start, 0], adjusted_pred_abs[end, 0]],
+                     [adjusted_pred_abs[start, 1], adjusted_pred_abs[end, 1]],
+                     [adjusted_pred_abs[start, 2], adjusted_pred_abs[end, 2]],
+                     c='r', linestyle='--', linewidth=2)
+        ax3.scatter(gt_abs[:, 0], gt_abs[:, 1], gt_abs[:, 2],
+                    c='g', marker='o', s=50, label='Ground Truth (Absolute)')
+        for start, end in skeleton:
+            ax3.plot([gt_abs[start, 0], gt_abs[end, 0]],
+                     [gt_abs[start, 1], gt_abs[end, 1]],
+                     [gt_abs[start, 2], gt_abs[end, 2]],
+                     c='g', linestyle='-', linewidth=2)
+        ax3.set_title("Adjusted Predictions in Absolute Coordinates")
+        ax3.set_xlabel("X")
+        ax3.set_ylabel("Y")
+        ax3.set_zlabel("Z")
+        ax3.legend()
+        plt.tight_layout()
+        plt.show()
+
+    # Convert the adjusted prediction back to a torch tensor on the original device.
+    adjusted_pred_abs_tensor = torch.tensor(adjusted_pred_abs).to(device)
+    return adjusted_pred_abs_tensor
+
 
 
 class HandNet(nn.Module):
@@ -399,7 +425,7 @@ class HandNet(nn.Module):
         # depth = self.depth_head(global_feature)
         #-------------
         #debug predicted uv keypoints     
-        visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
+        #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
         #-------------
         vertices = self.mesh_head(features, uv)
 
@@ -410,6 +436,17 @@ class HandNet(nn.Module):
         joints = mesh_to_joints(vertices)
         #debug
         #visualize_joints_comparison(joints[0], joints_gt=gt_joints[0], save_path='./debug_img/joints_comparison.png')
+        
+        
+        #marker information addition
+        if gt_joints is not None:
+            adjusted_joints_list = []
+            for i in range(joints.shape[0]):
+                adjusted = visualize_hand_predictions(joints[i], gt_joints[i], root_index=0)
+                adjusted_joints_list.append(adjusted)
+            # Replace joints with the adjusted version
+            joints = torch.stack(adjusted_joints_list, dim=0)
+        
 
         return {
             "uv": uv,
@@ -438,19 +475,19 @@ class HandNet(nn.Module):
         """
         image = image / 255 - 0.5
         if target is not None:
-            # Pass both the predicted and ground truth UV/Joints to the infer method.
             output_dict = self.infer(image, gt_uv=target["uv"], gt_joints=target["xyz"])
         else:
             output_dict = self.infer(image)
+            
         if self.training:
-            # In training mode, we require target to compute losses.
-            assert target is not None
+            # In training mode, require a target to compute losses.
+            assert target is not None, "Target is required for training"
             loss_dict = self._cal_single_hand_losses(output_dict, target)
             return loss_dict
         else:
-            # In eval mode, if a target is provided, you can compute evaluation metrics (e.g., losses) 
-            # and return both the predictions and those metrics.
-            if target is not None:
+            # In evaluation mode, if target is provided and has the necessary keys, you can compute eval metrics.
+            # Otherwise, simply return the output dictionary.
+            if target is not None and 'uv_valid' in target:
                 eval_metrics = self._cal_single_hand_losses(output_dict, target)
                 return output_dict, eval_metrics
             else:
