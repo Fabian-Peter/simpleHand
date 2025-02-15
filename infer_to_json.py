@@ -203,9 +203,9 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
     Visualize and compare predicted and ground truth hand coordinates.
     
     Args:
-        pred_coords (np.ndarray): Shape (N, 3) array of predicted 3D coordinates
-        gt_coords (np.ndarray): Shape (N, 3) array of ground truth 3D coordinates
-        root_index (int): Index of the root joint for making coordinates root-relative
+        pred_coords (np.ndarray): Shape (N, 3) array of predicted 3D coordinates.
+        gt_coords (np.ndarray): Shape (N, 3) array of ground truth 3D coordinates.
+        root_index (int): Index of the root joint for making coordinates root-relative.
     """
     # Define skeleton connections (example for a 21-joint hand model)
     skeleton = [
@@ -216,10 +216,10 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
         (0, 17), (17, 18), (18, 19), (19, 20)  # Pinky
     ]
     
-    # Make ground truth root-relative to match predictions
+    # Make ground truth coordinates root-relative to match predictions.
     gt_coords_relative = make_root_relative(gt_coords, root_index)
-    
-    # Calculate error statistics
+    pred_coords_relative = make_root_relative(pred_coords, root_index)
+    # Calculate error statistics between predictions and GT (after making GT root-relative)
     error = np.linalg.norm(pred_coords - gt_coords_relative, axis=1)
     mean_error = np.mean(error)
     max_error = np.max(error)
@@ -227,35 +227,41 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0):
     print(f"Mean joint error: {mean_error:.4f}")
     print(f"Max joint error: {max_error:.4f}")
     
-    # Visualization
+    # Create a 3D figure.
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(111, projection='3d')
     
-   
-    # Plot predictions
-    ax.scatter(pred_coords[:, 0], pred_coords[:, 1], pred_coords[:, 2], c='r', label='Predictions', s=50)
+    # Plot predicted joints (red) with their skeleton.
+    ax.scatter(pred_coords_relative[:, 0], pred_coords_relative[:, 1], pred_coords_relative[:, 2],
+               c='r', marker='x', s=50, label='Predictions')
     for start, end in skeleton:
-        ax.plot(
-            [pred_coords[start, 0], pred_coords[end, 0]],
-            [pred_coords[start, 1], pred_coords[end, 1]],
-            [pred_coords[start, 2], pred_coords[end, 2]],
-            c='r', linestyle='--', linewidth=2
-        )
+        ax.plot([pred_coords_relative[start, 0], pred_coords_relative[end, 0]],
+                [pred_coords_relative[start, 1], pred_coords_relative[end, 1]],
+                [pred_coords_relative[start, 2], pred_coords_relative[end, 2]],
+                c='r', linestyle='--', linewidth=2)
     
-    # Add annotations for error
-    for i in range(len(gt_coords)):
-        ax.text(
-            gt_coords_relative[i, 0], gt_coords_relative[i, 1], gt_coords_relative[i, 2],
-            f'{error[i]:.2f}', color='blue', fontsize=8
-        )
+    # Plot ground truth joints (green) with their skeleton.
+    ax.scatter(gt_coords_relative[:, 0], gt_coords_relative[:, 1], gt_coords_relative[:, 2],
+               c='g', marker='o', s=50, label='Ground Truth')
+    for start, end in skeleton:
+        ax.plot([gt_coords_relative[start, 0], gt_coords_relative[end, 0]],
+                [gt_coords_relative[start, 1], gt_coords_relative[end, 1]],
+                [gt_coords_relative[start, 2], gt_coords_relative[end, 2]],
+                c='g', linestyle='-', linewidth=2)
     
-    # Customize plot
+    # Annotate each joint (optional)
+    for i in range(len(gt_coords_relative)):
+        ax.text(gt_coords_relative[i, 0], gt_coords_relative[i, 1], gt_coords_relative[i, 2],
+                f'{error[i]:.2f}', color='blue', fontsize=8)
+    
+    # Customize the plot.
     ax.set_title("Hand Prediction vs Ground Truth")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     ax.legend()
     plt.show()
+
 
 def calculate_fscore(gt, pr, th=0.01):
     gt = verts2pcd(gt)
@@ -424,7 +430,9 @@ def main(epoch, tta=False, postfix=""):
         gt_xyz = np.array(xyz_gt_list[idx])
         pred_xyz = np.array(xyz_pred_list[idx])
 
-        #visualize_hand_predictions(pred_xyz, gt_xyz)
+        xyz_pred_aligned = align_w_scale(gt_xyz, pred_xyz)
+
+        #visualize_hand_predictions(xyz_pred_aligned, gt_xyz)
 
         xyz_pred, verts_pred = xyz_pred_list[idx], verts_pred_list[idx]
         xyz_pred, verts_pred = [np.array(x) for x in [xyz_pred, verts_pred]]

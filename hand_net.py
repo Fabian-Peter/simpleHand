@@ -213,42 +213,70 @@ def visualize_uv_keypoints(image, uv_pred, uv_gt, save_path='./debug_img/uv_keyp
 
 #-------------
 
-def visualize_predicted_vertices(vertices, save_path='./debug_img/vertices.png'):
+def visualize_joints_comparison(joints_pred, joints_gt, save_path='./debug_img/joints_comparison.png'):
     """
-    Visualize predicted vertices in a 3D scatter plot.
+    Visualize predicted vs ground truth joints in a 3D scatter plot with skeleton lines.
     
     Args:
-        vertices (torch.Tensor or np.ndarray): Predicted vertices of shape [N, 3] for one image.
+        joints_pred (torch.Tensor or np.ndarray): Predicted joints for one image, shape [21, 3].
+        joints_gt (torch.Tensor or np.ndarray): Ground truth joints for one image, shape [21, 3].
         save_path (str): Path where to save the visualization.
     """
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # Ensures 3D plotting is enabled
+    from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
     import os
 
-    # Convert to numpy if needed
-    if isinstance(vertices, torch.Tensor):
-        vertices = vertices.detach().cpu().numpy()
-    
+    # Convert to numpy arrays if necessary
+    if isinstance(joints_pred, torch.Tensor):
+        joints_pred = joints_pred.detach().cpu().numpy()
+    if isinstance(joints_gt, torch.Tensor):
+        joints_gt = joints_gt.detach().cpu().numpy()
+
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
-    # Create a 3D scatter plot
+
+    # Create a 3D figure
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection='3d')
+
+    # Plot predicted joints (red crosses) and ground truth joints (green circles)
+    ax.scatter(joints_pred[:, 0], joints_pred[:, 1], joints_pred[:, 2],
+               c='r', marker='x', s=50, label='Predicted')
+    ax.scatter(joints_gt[:, 0], joints_gt[:, 1], joints_gt[:, 2],
+               c='g', marker='o', s=50, label='Ground Truth')
+
+    # Define the hand skeleton connections (the same as in your 2D keypoint visualization)
+    skeleton = [
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        (0, 5), (5, 6), (6, 7), (7, 8),
+        (0, 9), (9, 10), (10, 11), (11, 12),
+        (0, 13), (13, 14), (14, 15), (15, 16),
+        (0, 17), (17, 18), (18, 19), (19, 20)
+    ]
     
-    ax.scatter(vertices[:, 0], vertices[:, 1], vertices[:, 2],
-               c='r', marker='o', s=20, label='Vertices')
+    # Draw skeleton lines for predicted joints in red
+    for (i, j) in skeleton:
+        ax.plot([joints_pred[i, 0], joints_pred[j, 0]],
+                [joints_pred[i, 1], joints_pred[j, 1]],
+                [joints_pred[i, 2], joints_pred[j, 2]],
+                c='r', linewidth=2, alpha=0.5)
     
-    ax.set_title("Predicted Vertices")
+    # Draw skeleton lines for ground truth joints in green
+    for (i, j) in skeleton:
+        ax.plot([joints_gt[i, 0], joints_gt[j, 0]],
+                [joints_gt[i, 1], joints_gt[j, 1]],
+                [joints_gt[i, 2], joints_gt[j, 2]],
+                c='g', linewidth=2, alpha=0.5)
+
+    ax.set_title("Predicted vs Ground Truth Joints")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     ax.legend()
-    
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"Predicted vertices visualization saved to: {save_path}")
+    print(f"Predicted vs Ground Truth joints visualization saved to: {save_path}")
 
 def visualize_predicted_joints(joints, save_path='./debug_img/joints.png'):
     """
@@ -349,7 +377,7 @@ class HandNet(nn.Module):
         
 
 
-    def infer(self, image, gt_uv=None):
+    def infer(self, image, gt_uv=None, gt_joints=None):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -381,7 +409,7 @@ class HandNet(nn.Module):
 
         joints = mesh_to_joints(vertices)
         #debug
-        #visualize_predicted_joints(joints[0], save_path='./debug_img/joints.png')
+        #visualize_joints_comparison(joints_pred[0], gt_xyz=gt_joints[0], save_path='./debug_img/joints_comparison.png')
 
         return {
             "uv": uv,
@@ -409,14 +437,24 @@ class HandNet(nn.Module):
             }     
         """
         image = image / 255 - 0.5
-        output_dict = self.infer(image, gt_uv=target["uv"])
+        if target is not None:
+            # Pass both the predicted and ground truth UV/Joints to the infer method.
+            output_dict = self.infer(image, gt_uv=target["uv"], gt_joints=target["xyz"])
+        else:
+            output_dict = self.infer(image)
         if self.training:
+            # In training mode, we require target to compute losses.
             assert target is not None
             loss_dict = self._cal_single_hand_losses(output_dict, target)
             return loss_dict
-
-        return output_dict
-
+        else:
+            # In eval mode, if a target is provided, you can compute evaluation metrics (e.g., losses) 
+            # and return both the predictions and those metrics.
+            if target is not None:
+                eval_metrics = self._cal_single_hand_losses(output_dict, target)
+                return output_dict, eval_metrics
+            else:
+                return output_dict
 
     def _cal_single_hand_losses(self, pred_hand_dict, gt_hand_dict):
         """get training loss
