@@ -138,78 +138,93 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-def visualize_uv_keypoints(image, uv_pred, uv_gt, save_path='./debug_img/uv_keypoints.png'):
+def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug=True):
     """
-    Overlay both predicted and ground truth UV keypoints on the image with skeleton lines.
+    Adjust the predicted UV keypoints by replacing the keypoints at the indices specified in adjust_idxs 
+    with the corresponding ground truth values, and optionally visualize the result.
+    
+    The predicted keypoints are drawn as red circles with their indices labeled in red,
+    and a skeleton is drawn connecting them with green lines. The ground truth keypoints
+    are drawn as blue crosses with their indices labeled in blue, and a skeleton is drawn
+    connecting them with orange lines.
     
     Args:
-        image (torch.Tensor or np.ndarray): Cropped image in shape [C, H, W] in range [0,1].
-        uv_pred (torch.Tensor or np.ndarray): Predicted keypoints, shape [N, 2] (normalized).
-        uv_gt (torch.Tensor or np.ndarray): Ground truth keypoints, shape [N, 2] (normalized).
-        save_path (str): Path to save the visualization.
+        uv_pred (torch.Tensor or np.ndarray): Predicted UV keypoints (assumed to be in pixel coordinates).
+        uv_gt (torch.Tensor or np.ndarray): Ground truth UV keypoints (assumed to be in pixel coordinates).
+        adjust_idxs (list): List of indices at which the predicted keypoints should be set to the ground truth.
+        debug (bool): If True, the plot will be rendered and displayed. If False, only the adjusted uv_pred is returned.
+    
+    Returns:
+        np.ndarray: The adjusted predicted UV keypoints.
     """
-    # Convert image to numpy (H, W, C)
-    if hasattr(image, 'detach'):
-        image_np = image.detach().cpu().permute(1, 2, 0).numpy()
-    else:
-        image_np = image
-
-    H, W, _ = image_np.shape
-
-    # Convert keypoints to numpy arrays and reshape if needed
-    if hasattr(uv_pred, 'detach'):
-        uv_pred = uv_pred.detach().cpu().view(-1, 2).numpy()
-    if hasattr(uv_gt, 'detach'):
-        uv_gt = uv_gt.detach().cpu().view(-1, 2).numpy()
-
-    # Scale UV coordinates from normalized [0, 1] to pixel space [0, W] and [0, H]
-    uv_pred_pixel = uv_pred * np.array([W, H])
-    uv_gt_pixel = uv_gt * np.array([W, H])
-
-    # Define the hand skeleton as connections (edges) between keypoint indices.
-    skeleton = [
-        # Thumb: wrist -> 1 -> 2 -> 3 -> 4
-        (0, 1), (1, 2), (2, 3), (3, 4),
-        # Index finger: wrist -> 5 -> 6 -> 7 -> 8
-        (0, 5), (5, 6), (6, 7), (7, 8),
-        # Middle finger: wrist -> 9 -> 10 -> 11 -> 12
-        (0, 9), (9, 10), (10, 11), (11, 12),
-        # Ring finger: wrist -> 13 -> 14 -> 15 -> 16
-        (0, 13), (13, 14), (14, 15), (15, 16),
-        # Little finger: wrist -> 17 -> 18 -> 19 -> 20
-        (0, 17), (17, 18), (18, 19), (19, 20)
-    ]
-
-    plt.figure(figsize=(8, 8))
-    plt.imshow(image_np)
+    # Convert inputs to numpy arrays if needed.
+    if isinstance(uv_pred, torch.Tensor):
+        uv_pred = uv_pred.detach().cpu().numpy()
+    if isinstance(uv_gt, torch.Tensor):
+        uv_gt = uv_gt.detach().cpu().numpy()
     
-    # Draw ground truth skeleton in green
-    for edge in skeleton:
-        pt1, pt2 = edge
-        x_vals = [uv_gt_pixel[pt1, 0], uv_gt_pixel[pt2, 0]]
-        y_vals = [uv_gt_pixel[pt1, 1], uv_gt_pixel[pt2, 1]]
-        plt.plot(x_vals, y_vals, 'g-', linewidth=2)
-    
-    # Draw predicted skeleton in red
-    for edge in skeleton:
-        pt1, pt2 = edge
-        x_vals = [uv_pred_pixel[pt1, 0], uv_pred_pixel[pt2, 0]]
-        y_vals = [uv_pred_pixel[pt1, 1], uv_pred_pixel[pt2, 1]]
-        plt.plot(x_vals, y_vals, 'r-', linewidth=2)
-    
-    # Overlay ground truth keypoints with green circles
-    plt.scatter(uv_gt_pixel[:, 0], uv_gt_pixel[:, 1], s=100, c='green', marker='o', label='Ground Truth')
-    # Overlay predicted keypoints with red crosses
-    plt.scatter(uv_pred_pixel[:, 0], uv_pred_pixel[:, 1], s=100, c='red', marker='x', label='Predicted')
+    # Helper function to reshape keypoints if they are flattened (e.g., shape (1,42) for 21 keypoints).
+    def reshape_keypoints(uv):
+        if uv.ndim == 1:
+            uv = np.expand_dims(uv, axis=0)
+        if uv.ndim == 2 and uv.shape[1] != 2:
+            if uv.shape[1] % 2 == 0:
+                uv = uv.reshape(-1, 2)
+            else:
+                raise ValueError("UV keypoints shape is not as expected.")
+        return uv
 
-    plt.title("Predicted vs Ground Truth 2D Keypoints with Hand Skeleton")
-    plt.axis('off')
-    plt.legend()
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
-    print(f"UV keypoints visualization saved to: {save_path}")
+    uv_pred = reshape_keypoints(uv_pred)
+    uv_gt   = reshape_keypoints(uv_gt)
+    
+    # Adjust the predicted keypoints in place.
+    for idx in adjust_idxs:
+        if idx < uv_pred.shape[0] and idx < uv_gt.shape[0]:
+            uv_pred[idx, :] = uv_gt[idx, :]
+    
+    if debug:
+        plt.figure(figsize=(8, 8))
+        # Plot keypoints: adjusted predicted in red, ground truth in blue.
+        plt.scatter(uv_pred[:, 0], uv_pred[:, 1],
+                    s=40, c='red', marker='o', label='Adjusted Predicted UV')
+        plt.scatter(uv_gt[:, 0], uv_gt[:, 1],
+                    s=40, c='blue', marker='x', label='Ground Truth UV')
+        
+        # Annotate each keypoint with its index.
+        for i, pt in enumerate(uv_pred):
+            plt.text(pt[0] + 2, pt[1] + 2, str(i), fontsize=12, color='red')
+        for i, pt in enumerate(uv_gt):
+            plt.text(pt[0] + 2, pt[1] + 2, str(i), fontsize=12, color='blue')
+        
+        # Define the skeleton connections.
+        skeleton = [
+            (0, 1), (1, 2), (2, 3), (3, 4),    # Thumb
+            (0, 5), (5, 6), (6, 7), (7, 8),     # Index
+            (0, 9), (9, 10), (10, 11), (11, 12), # Middle
+            (0, 13), (13, 14), (14, 15), (15, 16),# Ring
+            (0, 17), (17, 18), (18, 19), (19, 20) # Pinky
+        ]
+        
+        # Draw skeleton for adjusted predicted keypoints (green lines).
+        for joint_start, joint_end in skeleton:
+            if joint_start < uv_pred.shape[0] and joint_end < uv_pred.shape[0]:
+                pt1 = uv_pred[joint_start]
+                pt2 = uv_pred[joint_end]
+                plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color='green', linewidth=2)
+        
+        # Draw skeleton for ground truth keypoints (orange lines).
+        for joint_start, joint_end in skeleton:
+            if joint_start < uv_gt.shape[0] and joint_end < uv_gt.shape[0]:
+                pt1 = uv_gt[joint_start]
+                pt2 = uv_gt[joint_end]
+                plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color='orange', linewidth=2)
+        
+        plt.legend()
+        plt.title("UV Predictions vs. Ground Truth (Adjusted at Selected Indices)")
+        plt.axis("off")
+        plt.show()
+    
+    return uv_pred
 
 #-------------
 
@@ -426,9 +441,16 @@ class HandNet(nn.Module):
         #-------------
         #debug predicted uv keypoints     
         #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
-        #-------------
-        vertices = self.mesh_head(features, uv)
 
+        #-------------
+        adjusted_uv_list = []
+        for i in range(uv.shape[0]):
+            adjusted_np = visualize_uv_keypoints(uv[i], gt_uv[i], debug=False)
+            adjusted_tensor = torch.from_numpy(adjusted_np).to(uv.device).type_as(uv)
+            adjusted_uv_list.append(adjusted_tensor)
+        uv = torch.stack(adjusted_uv_list, dim=0)
+
+        vertices = self.mesh_head(features, uv)
         #debug predicted vertices
         #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
 
