@@ -138,7 +138,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug=True):
+def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug=False):
     """
     Adjust the predicted UV keypoints by replacing the keypoints at the indices specified in adjust_idxs 
     with the corresponding ground truth values, and optionally visualize the result.
@@ -180,7 +180,8 @@ def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug
     # Adjust the predicted keypoints in place.
     for idx in adjust_idxs:
         if idx < uv_pred.shape[0] and idx < uv_gt.shape[0]:
-            uv_pred[idx, :] = uv_gt[idx, :]
+            noise = np.random.normal(loc=0.0, scale=0.01, size=2)
+            uv_pred[idx, :] = uv_gt[idx, :] + noise
     
     if debug:
         plt.figure(figsize=(8, 8))
@@ -228,7 +229,7 @@ def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug
 
 #-------------
 
-def visualize_hand_predictions(pred_coords, gt_coords, root_index=0, debug=False):
+def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
     """
     Visualize and compare predicted and ground truth hand coordinates.
     Additionally, adjust the predicted values for certain joints (indexes 4, 8, 12, 16, 20)
@@ -305,7 +306,8 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0, debug=False
     adjust_idxs = [4, 8, 12, 16, 20]
     adjusted_rel = pred_rel.copy()
     for idx in adjust_idxs:
-        adjusted_rel[idx] = gt_rel[idx]
+        noise = np.random.normal(loc=0.0, scale=0.01, size=3)
+        adjusted_rel[idx] = gt_rel[idx] + noise
 
     if debug:
         error_adjusted = np.linalg.norm(adjusted_rel - gt_rel, axis=1)
@@ -317,18 +319,24 @@ def visualize_hand_predictions(pred_coords, gt_coords, root_index=0, debug=False
                     c='r', marker='x', s=50, label='Adjusted Predictions')
         for start, end in skeleton:
             ax2.plot([adjusted_rel[start, 0], adjusted_rel[end, 0]],
-                     [adjusted_rel[start, 1], adjusted_rel[end, 1]],
-                     [adjusted_rel[start, 2], adjusted_rel[end, 2]],
-                     c='r', linestyle='--', linewidth=2)
+                    [adjusted_rel[start, 1], adjusted_rel[end, 1]],
+                    [adjusted_rel[start, 2], adjusted_rel[end, 2]],
+                    c='r', linestyle='--', linewidth=2)
+        # Plot all GT points as before.
         ax2.scatter(gt_rel[:, 0], gt_rel[:, 1], gt_rel[:, 2],
                     c='g', marker='o', s=50, label='Ground Truth')
         for start, end in skeleton:
             ax2.plot([gt_rel[start, 0], gt_rel[end, 0]],
-                     [gt_rel[start, 1], gt_rel[end, 1]],
-                     [gt_rel[start, 2], gt_rel[end, 2]],
-                     c='g', linestyle='-', linewidth=2)
+                    [gt_rel[start, 1], gt_rel[end, 1]],
+                    [gt_rel[start, 2], gt_rel[end, 2]],
+                    c='g', linestyle='-', linewidth=2)
+        
+        # Additionally, plot the GT coordinates for the adjusted indexes without noise in a different marker/color.
+        ax2.scatter(gt_rel[adjust_idxs, 0], gt_rel[adjust_idxs, 1], gt_rel[adjust_idxs, 2],
+                    c='b', marker='^', s=70, label='GT (Clean for Adjusted)')
+        
         ax2.set_title("Adjusted Root-Relative Predictions\n"
-                      "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_adjusted, max_error_adjusted))
+                    "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_adjusted, max_error_adjusted))
         ax2.set_xlabel("X")
         ax2.set_ylabel("Y")
         ax2.set_zlabel("Z")
@@ -443,12 +451,14 @@ class HandNet(nn.Module):
         #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
 
         #-------------
+        
         adjusted_uv_list = []
         for i in range(uv.shape[0]):
-            adjusted_np = visualize_uv_keypoints(uv[i], gt_uv[i], debug=False)
+            adjusted_np = visualize_uv_keypoints(uv[i], gt_uv[i])
             adjusted_tensor = torch.from_numpy(adjusted_np).to(uv.device).type_as(uv)
             adjusted_uv_list.append(adjusted_tensor)
         uv = torch.stack(adjusted_uv_list, dim=0)
+        
 
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
@@ -459,16 +469,16 @@ class HandNet(nn.Module):
         #debug
         #visualize_joints_comparison(joints[0], joints_gt=gt_joints[0], save_path='./debug_img/joints_comparison.png')
         
-        
+        '''
         #marker information addition
         if gt_joints is not None:
             adjusted_joints_list = []
             for i in range(joints.shape[0]):
-                adjusted = visualize_hand_predictions(joints[i], gt_joints[i], root_index=0)
+                adjusted = inject_3D_marker(joints[i], gt_joints[i], root_index=0)
                 adjusted_joints_list.append(adjusted)
             # Replace joints with the adjusted version
             joints = torch.stack(adjusted_joints_list, dim=0)
-        
+        '''
 
         return {
             "uv": uv,
