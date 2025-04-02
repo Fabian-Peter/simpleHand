@@ -229,6 +229,46 @@ def visualize_uv_keypoints(uv_pred, uv_gt, adjust_idxs=[4, 8, 12, 16, 20], debug
 
 #-------------
 
+def visualize_predicted_vertices(vertices, save_path='./debug_img/vertices.png', show=True, title="Predicted Vertices"):
+    """
+    Visualize 3D predicted hand mesh vertices.
+
+    Args:
+        vertices (torch.Tensor or np.ndarray): 3D coordinates of shape (778, 3)
+        save_path (str): Path to save the figure
+        show (bool): If True, display the plot
+        title (str): Title of the plot
+    """
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    # Convert to numpy if needed
+    if isinstance(vertices, torch.Tensor):
+        vertices = vertices.detach().cpu().numpy()
+
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot points
+    ax.scatter(vertices[:, 0], vertices[:, 1], vertices[:, 2], c='steelblue', s=2)
+
+    ax.set_title(title)
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.view_init(elev=20, azim=70)  # Nice default view angle
+    ax.grid(True)
+
+    # Save and show
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Predicted vertices saved to: {save_path}")
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
 def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
     """
     Visualize and compare predicted and ground truth hand coordinates.
@@ -451,25 +491,22 @@ class HandNet(nn.Module):
         #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
 
         #-------------
-        
+        '''
         adjusted_uv_list = []
         for i in range(uv.shape[0]):
             adjusted_np = visualize_uv_keypoints(uv[i], gt_uv[i])
             adjusted_tensor = torch.from_numpy(adjusted_np).to(uv.device).type_as(uv)
             adjusted_uv_list.append(adjusted_tensor)
         uv = torch.stack(adjusted_uv_list, dim=0)
-        
+        '''
 
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
-        #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
+        visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
 
 
         joints = mesh_to_joints(vertices)
-        #debug
-        #visualize_joints_comparison(joints[0], joints_gt=gt_joints[0], save_path='./debug_img/joints_comparison.png')
-        
-        '''
+       
         #marker information addition
         if gt_joints is not None:
             adjusted_joints_list = []
@@ -478,7 +515,7 @@ class HandNet(nn.Module):
                 adjusted_joints_list.append(adjusted)
             # Replace joints with the adjusted version
             joints = torch.stack(adjusted_joints_list, dim=0)
-        '''
+        
 
         return {
             "uv": uv,
