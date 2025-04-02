@@ -269,16 +269,17 @@ def visualize_predicted_vertices(vertices, save_path='./debug_img/vertices.png',
     else:
         plt.close()
 
-def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
+def inject_3D_marker(pred_coords, gt_coords, marker_visibility, root_index=0, debug=False):
     """
     Visualize and compare predicted and ground truth hand coordinates.
     Additionally, adjust the predicted values for certain joints (indexes 4, 8, 12, 16, 20)
-    by replacing them with the ground truth values (in root-relative coordinates).
-    Finally, undo the root-relative transformation and return the adjusted predicted values.
+    by replacing them with the ground truth values (in root-relative coordinates) if their corresponding
+    marker visibility value is 1. For marker positions with a visibility value of 0, keep the original prediction.
     
     Args:
         pred_coords (np.ndarray or torch.Tensor): Shape (N, 3) array of predicted 3D coordinates in absolute space.
         gt_coords (np.ndarray or torch.Tensor): Shape (N, 3) array of ground truth 3D coordinates in absolute space.
+        marker_visibility (list or np.ndarray): List of 5 binary values indicating which marker positions to adjust.
         root_index (int): Index of the root joint for making coordinates root-relative.
         debug (bool): If True, generate debug plots.
         
@@ -345,10 +346,13 @@ def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
     # Adjust predictions: Replace specified joints in the predicted values with ground truth values.
     adjust_idxs = [4, 8, 12, 16, 20]
     adjusted_rel = pred_rel.copy()
-    for idx in adjust_idxs:
-        noise = np.random.normal(loc=0.0, scale=0.01, size=3)
-        adjusted_rel[idx] = gt_rel[idx] + noise
-
+    for i, idx in enumerate(adjust_idxs):
+        # Convert the marker visibility flag to a Python scalar.
+        vis = marker_visibility[i].item() if isinstance(marker_visibility, torch.Tensor) else marker_visibility[i]
+        # Only adjust the marker if its visibility flag is 1.
+        if vis == 1:
+            noise = np.random.normal(loc=0.0, scale=0.01, size=3)
+            adjusted_rel[idx] = gt_rel[idx] + noise
     if debug:
         error_adjusted = np.linalg.norm(adjusted_rel - gt_rel, axis=1)
         mean_error_adjusted = np.mean(error_adjusted)
@@ -359,24 +363,23 @@ def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
                     c='r', marker='x', s=50, label='Adjusted Predictions')
         for start, end in skeleton:
             ax2.plot([adjusted_rel[start, 0], adjusted_rel[end, 0]],
-                    [adjusted_rel[start, 1], adjusted_rel[end, 1]],
-                    [adjusted_rel[start, 2], adjusted_rel[end, 2]],
-                    c='r', linestyle='--', linewidth=2)
-        # Plot all GT points as before.
+                     [adjusted_rel[start, 1], adjusted_rel[end, 1]],
+                     [adjusted_rel[start, 2], adjusted_rel[end, 2]],
+                     c='r', linestyle='--', linewidth=2)
         ax2.scatter(gt_rel[:, 0], gt_rel[:, 1], gt_rel[:, 2],
                     c='g', marker='o', s=50, label='Ground Truth')
         for start, end in skeleton:
             ax2.plot([gt_rel[start, 0], gt_rel[end, 0]],
-                    [gt_rel[start, 1], gt_rel[end, 1]],
-                    [gt_rel[start, 2], gt_rel[end, 2]],
-                    c='g', linestyle='-', linewidth=2)
+                     [gt_rel[start, 1], gt_rel[end, 1]],
+                     [gt_rel[start, 2], gt_rel[end, 2]],
+                     c='g', linestyle='-', linewidth=2)
         
-        # Additionally, plot the GT coordinates for the adjusted indexes without noise in a different marker/color.
+        # Additionally, plot the GT coordinates for the adjusted indexes without noise in a different marker.
         ax2.scatter(gt_rel[adjust_idxs, 0], gt_rel[adjust_idxs, 1], gt_rel[adjust_idxs, 2],
                     c='b', marker='^', s=70, label='GT (Clean for Adjusted)')
         
         ax2.set_title("Adjusted Root-Relative Predictions\n"
-                    "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_adjusted, max_error_adjusted))
+                      "Mean Error: {:.4f}, Max Error: {:.4f}".format(mean_error_adjusted, max_error_adjusted))
         ax2.set_xlabel("X")
         ax2.set_ylabel("Y")
         ax2.set_zlabel("Z")
@@ -418,6 +421,7 @@ def inject_3D_marker(pred_coords, gt_coords, root_index=0, debug=False):
     # Convert the adjusted prediction back to a torch tensor on the original device.
     adjusted_pred_abs_tensor = torch.tensor(adjusted_pred_abs).to(device)
     return adjusted_pred_abs_tensor
+
 
 
 
@@ -466,7 +470,7 @@ class HandNet(nn.Module):
         
 
 
-    def infer(self, image, gt_uv, gt_joints):
+    def infer(self, image, gt_uv, gt_joints, marker_visibility):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -511,7 +515,7 @@ class HandNet(nn.Module):
         if gt_joints is not None:
             adjusted_joints_list = []
             for i in range(joints.shape[0]):
-                adjusted = inject_3D_marker(joints[i], gt_joints[i], root_index=0)
+                adjusted = inject_3D_marker(joints[i], gt_joints[i], marker_visibility[i], root_index=0)
                 adjusted_joints_list.append(adjusted)
             # Replace joints with the adjusted version
             joints = torch.stack(adjusted_joints_list, dim=0)
@@ -544,7 +548,7 @@ class HandNet(nn.Module):
         """
         image = image / 255 - 0.5
         if target is not None:
-            output_dict = self.infer(image, gt_uv=target["uv"], gt_joints=target["xyz"])
+            output_dict = self.infer(image, gt_uv=target["uv"], gt_joints=target["xyz"], marker_visibility=target["marker_visibility"])
         else:
             output_dict = self.infer(image)
             

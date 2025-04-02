@@ -101,6 +101,7 @@ class HandMeshEvalDataset(Dataset):
             "scale": self.img_size[0],
             "ori_xyz":ori_xyz,
             "ori_vertices":ori_vertices,
+            "marker_visibility": np.array(data_dict["marker_visibility"], dtype=np.int32),
         }
         
     def __str__(self):

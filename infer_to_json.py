@@ -521,10 +521,10 @@ def main(epoch, tta=False, postfix=""):
         f_out.append('f_al_score_%d: %f' % (round(t*1000), fa.mean()))
 
     os.makedirs(os.path.dirname(result_json_path), exist_ok=True)
-
+    '''
     with open(result_json_path, 'w') as f:
          json.dump(dataset.all_info, f)
-            
+    '''        
     print(f"Result save to {result_json_path}")
 
         
