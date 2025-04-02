@@ -466,7 +466,7 @@ class HandNet(nn.Module):
         
 
 
-    def infer(self, image, gt_uv=None, gt_joints=None):
+    def infer(self, image, gt_uv, gt_joints):
         if self.is_hiera:
             x, intermediates = self.backbone(image, return_intermediates=True)
             features = intermediates[-1]
@@ -502,7 +502,7 @@ class HandNet(nn.Module):
 
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
-        visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
+        #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
 
 
         joints = mesh_to_joints(vertices)

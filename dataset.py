@@ -163,6 +163,7 @@ class HandDataset(Dataset):
             "uv_valid": trans_coord_valid,
             "gamma": gamma,
             "xyz_valid": xyz_valid,
+            "marker_visibility": np.array(data_info.get("marker_visibility", []), dtype=np.int32),
         }
 
         return data
