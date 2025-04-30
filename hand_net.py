@@ -423,68 +423,87 @@ def inject_3D_marker(pred_coords, gt_coords, marker_visibility, root_index=0, de
     return adjusted_pred_abs_tensor
 
 
-def plot_uv_keypoints(
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+def plot_and_adjust_uv_keypoints(
     image: torch.Tensor,
     uv_pred: torch.Tensor,
-    uv_gt: torch.Tensor,
+    uv_gt: torch.Tensor,          
     skeleton: list[tuple[int,int]] = None,
     figsize: tuple[int,int] = (6,6),
     markersize: int = 30,
     alpha: float = 0.8,
-    dpi: int = 100
-):
+    dpi: int = 100,
+    debug = False
+) -> torch.Tensor:
     """
-    Overlay predicted and ground truth UV keypoints on an image.
+    1. Plots pred vs GT UVs (with skeleton).
+    2. Overwrites pred[i] := gt[i] for each i in adjust_indices.
+    3. Returns a new uv_pred tensor (same shape/dtype/device as input).
+    """
 
-    Args:
-        image (torch.Tensor): (3,H,W) in [0,1] or uint8 [0,255].
-        uv_pred (torch.Tensor): (K,2) or (2K,) predicted UVs.
-        uv_gt   (torch.Tensor): (K,2) or (2K,) ground-truth UVs.
-        skeleton (list[(int,int)]): Optional bone connections.
-    """
-    # to numpy & uint8
+    skeleton = [
+        (0,1),(1,2),(2,3),(3,4),
+        (0,5),(5,6),(6,7),(7,8),
+        (0,9),(9,10),(10,11),(11,12),
+        (0,13),(13,14),(14,15),(15,16),
+        (0,17),(17,18),(18,19),(19,20),
+    ]
+
+    adjust_indices = [4, 8, 12, 16, 20]
+
     img = image.detach().cpu().numpy()
     if img.dtype != np.uint8:
         img = (img * 255).astype(np.uint8)
-    img = np.transpose(img, (1,2,0))  # HWC
+    img = np.transpose(img, (1,2,0))
+    h, w = img.shape[:2]
 
-    # uv arrays
     up = uv_pred.detach().cpu().numpy()
     ug = uv_gt.detach().cpu().numpy()
 
-    # reshape flat->(K,2) if needed
     def ensure_K2(x):
         if x.ndim == 1:
-            assert x.shape[0] % 2 == 0, "UV length must be even"
-            x = x.reshape(-1, 2)
+            x = x.reshape(-1,2)
         return x
     up = ensure_K2(up)
     ug = ensure_K2(ug)
 
-    h, w = img.shape[:2]
+    normalized = up.max() <= 1.01
+    if normalized:
+        up = up * np.array([w,h])[None,:]
+        ug = ug * np.array([w,h])[None,:]
 
-    # scale normalized UVs
-    if up.max() <= 1.01:
-        up = up * np.array([w, h])[None, :]
-    if ug.max() <= 1.01:
-        ug = ug * np.array([w, h])[None, :]
-
-    # plot
-    fig = plt.figure(figsize=figsize, dpi=dpi)
-    ax = fig.add_subplot(1,1,1)
-    ax.scatter(ug[:,0], ug[:,1], c='g', marker='o', s=markersize, alpha=alpha, label='GT')
-    ax.scatter(up[:,0], up[:,1], c='r', marker='x', s=markersize, alpha=alpha, label='Pred')
-
-    if skeleton is not None:
+    up_adj = up.copy()
+    '''
+    for idx in adjust_indices:
+        up_adj[idx] = ug[idx]
+    '''
+    if debug:
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        ax = fig.add_subplot(1,1,1)
+        #ax.imshow(img)
+        ax.scatter(ug[:,0], ug[:,1], c='g', marker='o', s=markersize, alpha=alpha, label='GT')
+        ax.scatter(up_adj[:,0], up_adj[:,1], c='r', marker='x', s=markersize, alpha=alpha, label='Adjusted Pred')
         for i, j in skeleton:
             ax.plot([ug[i,0], ug[j,0]], [ug[i,1], ug[j,1]], c='g', linewidth=1)
-            ax.plot([up[i,0], up[j,0]], [up[i,1], up[j,1]], c='r', linestyle='--', linewidth=1)
+            ax.plot([up_adj[i,0], up_adj[j,0]], [up_adj[i,1], up_adj[j,1]],
+                    c='r', linestyle='--', linewidth=1)
+        ax.axis('off')
+        ax.legend(loc='upper right')
+        plt.tight_layout()
+        plt.show()
+    
 
-    ax.set_title("UV Keypoints: Prediction vs. Ground Truth")
-    ax.axis('off')
-    ax.legend(loc='upper right')
-    plt.tight_layout()
-    plt.show()
+    if normalized:
+        up_adj = up_adj / np.array([w,h])[None,:]
+
+    if uv_pred.ndim == 1:
+        up_adj = up_adj.reshape(-1)
+
+    uv_new = torch.from_numpy(up_adj).to(uv_pred.device).type_as(uv_pred)
+    return uv_new
 
 class HandNet(nn.Module):
     def __init__(self, cfg, pretrained=None):
@@ -565,22 +584,12 @@ class HandNet(nn.Module):
         uv = torch.stack(adjusted_uv_list, dim=0)
         '''
 
-        pred = uv[0]
-        gt   = gt_uv[0]
-        img0 = image[0]
-
-        plot_uv_keypoints(
-            img0,
-            pred,
-            gt,
-            skeleton=[
-                (0,1),(1,2),(2,3),(3,4),
-                (0,5),(5,6),(6,7),(7,8),
-                (0,9),(9,10),(10,11),(11,12),
-                (0,13),(13,14),(14,15),(15,16),
-                (0,17),(17,18),(18,19),(19,20),
-            ]
-        )
+        for i in range(uv.shape[0]):
+            uv[i] = plot_and_adjust_uv_keypoints(
+                image[i],   # (3,H,W)
+                uv[i],      # your pred
+                gt_uv[i]   # your ground truth
+            )
 
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
