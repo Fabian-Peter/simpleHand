@@ -269,7 +269,7 @@ def visualize_predicted_vertices(vertices, save_path='./debug_img/vertices.png',
     else:
         plt.close()
 
-def inject_3D_marker(pred_coords, gt_coords, marker_visibility, root_index=0, debug=False):
+def inject_3D_marker(pred_coords, gt_coords, marker_visibility, root_index=0, debug=True):
     """
     Visualize and compare predicted and ground truth hand coordinates.
     Additionally, adjust the predicted values for certain joints (indexes 4, 8, 12, 16, 20)
@@ -423,7 +423,68 @@ def inject_3D_marker(pred_coords, gt_coords, marker_visibility, root_index=0, de
     return adjusted_pred_abs_tensor
 
 
+def plot_uv_keypoints(
+    image: torch.Tensor,
+    uv_pred: torch.Tensor,
+    uv_gt: torch.Tensor,
+    skeleton: list[tuple[int,int]] = None,
+    figsize: tuple[int,int] = (6,6),
+    markersize: int = 30,
+    alpha: float = 0.8,
+    dpi: int = 100
+):
+    """
+    Overlay predicted and ground truth UV keypoints on an image.
 
+    Args:
+        image (torch.Tensor): (3,H,W) in [0,1] or uint8 [0,255].
+        uv_pred (torch.Tensor): (K,2) or (2K,) predicted UVs.
+        uv_gt   (torch.Tensor): (K,2) or (2K,) ground-truth UVs.
+        skeleton (list[(int,int)]): Optional bone connections.
+    """
+    # to numpy & uint8
+    img = image.detach().cpu().numpy()
+    if img.dtype != np.uint8:
+        img = (img * 255).astype(np.uint8)
+    img = np.transpose(img, (1,2,0))  # HWC
+
+    # uv arrays
+    up = uv_pred.detach().cpu().numpy()
+    ug = uv_gt.detach().cpu().numpy()
+
+    # reshape flat->(K,2) if needed
+    def ensure_K2(x):
+        if x.ndim == 1:
+            assert x.shape[0] % 2 == 0, "UV length must be even"
+            x = x.reshape(-1, 2)
+        return x
+    up = ensure_K2(up)
+    ug = ensure_K2(ug)
+
+    h, w = img.shape[:2]
+
+    # scale normalized UVs
+    if up.max() <= 1.01:
+        up = up * np.array([w, h])[None, :]
+    if ug.max() <= 1.01:
+        ug = ug * np.array([w, h])[None, :]
+
+    # plot
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = fig.add_subplot(1,1,1)
+    ax.scatter(ug[:,0], ug[:,1], c='g', marker='o', s=markersize, alpha=alpha, label='GT')
+    ax.scatter(up[:,0], up[:,1], c='r', marker='x', s=markersize, alpha=alpha, label='Pred')
+
+    if skeleton is not None:
+        for i, j in skeleton:
+            ax.plot([ug[i,0], ug[j,0]], [ug[i,1], ug[j,1]], c='g', linewidth=1)
+            ax.plot([up[i,0], up[j,0]], [up[i,1], up[j,1]], c='r', linestyle='--', linewidth=1)
+
+    ax.set_title("UV Keypoints: Prediction vs. Ground Truth")
+    ax.axis('off')
+    ax.legend(loc='upper right')
+    plt.tight_layout()
+    plt.show()
 
 class HandNet(nn.Module):
     def __init__(self, cfg, pretrained=None):
@@ -504,13 +565,30 @@ class HandNet(nn.Module):
         uv = torch.stack(adjusted_uv_list, dim=0)
         '''
 
+        pred = uv[0]
+        gt   = gt_uv[0]
+        img0 = image[0]
+
+        plot_uv_keypoints(
+            img0,
+            pred,
+            gt,
+            skeleton=[
+                (0,1),(1,2),(2,3),(3,4),
+                (0,5),(5,6),(6,7),(7,8),
+                (0,9),(9,10),(10,11),(11,12),
+                (0,13),(13,14),(14,15),(15,16),
+                (0,17),(17,18),(18,19),(19,20),
+            ]
+        )
+
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
         #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
 
 
         joints = mesh_to_joints(vertices)
-       
+        '''
         #marker information addition
         if gt_joints is not None:
             adjusted_joints_list = []
@@ -519,7 +597,7 @@ class HandNet(nn.Module):
                 adjusted_joints_list.append(adjusted)
             # Replace joints with the adjusted version
             joints = torch.stack(adjusted_joints_list, dim=0)
-        
+        '''
 
         return {
             "uv": uv,
