@@ -427,82 +427,42 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-def plot_and_adjust_uv_keypoints(
-    image: torch.Tensor,
+def uv_inject(
     uv_pred: torch.Tensor,
-    uv_gt: torch.Tensor,          
-    skeleton: list[tuple[int,int]] = None,
-    figsize: tuple[int,int] = (6,6),
-    markersize: int = 30,
-    alpha: float = 0.8,
-    dpi: int = 100,
-    debug = False
-) -> torch.Tensor:
+    uv_gt:   torch.Tensor,
+    adjust_indices: list[int] = [4,8,12,16,20],
+):
     """
-    1. Plots pred vs GT UVs (with skeleton).
-    2. Overwrites pred[i] := gt[i] for each i in adjust_indices.
-    3. Returns a new uv_pred tensor (same shape/dtype/device as input).
+    Returns a new tensor where uv_pred[...,i,:] == uv_gt[...,i,:]
+    for every i in adjust_indices, but leaves the rest of uv_pred
+    connected to the graph (so gradients still flow).
     """
+    # uv_pred: (..., K, 2) or (..., 2K,) 
+    # first reshape to (..., K, 2)
+    orig_shape = uv_pred.shape
+    flat = (uv_pred.ndim == 2 and orig_shape[1] % 2 == 0)
+    if flat:
+        B, twoK = orig_shape
+        K = twoK // 2
+        uv = uv_pred.view(B, K, 2)
+        gt = uv_gt.view(B, K, 2)
+    else:
+        uv = uv_pred
+        gt = uv_gt
 
-    skeleton = [
-        (0,1),(1,2),(2,3),(3,4),
-        (0,5),(5,6),(6,7),(7,8),
-        (0,9),(9,10),(10,11),(11,12),
-        (0,13),(13,14),(14,15),(15,16),
-        (0,17),(17,18),(18,19),(19,20),
-    ]
+    # clone so we don’t overwrite in-place
+    uv_new = uv.clone()
 
-    adjust_indices = [4, 8, 12, 16, 20]
-
-    img = image.detach().cpu().numpy()
-    if img.dtype != np.uint8:
-        img = (img * 255).astype(np.uint8)
-    img = np.transpose(img, (1,2,0))
-    h, w = img.shape[:2]
-
-    up = uv_pred.detach().cpu().numpy()
-    ug = uv_gt.detach().cpu().numpy()
-
-    def ensure_K2(x):
-        if x.ndim == 1:
-            x = x.reshape(-1,2)
-        return x
-    up = ensure_K2(up)
-    ug = ensure_K2(ug)
-
-    normalized = up.max() <= 1.01
-    if normalized:
-        up = up * np.array([w,h])[None,:]
-        ug = ug * np.array([w,h])[None,:]
-
-    up_adj = up.copy()
+    # copy GT into uv_new at those indices
     '''
-    for idx in adjust_indices:
-        up_adj[idx] = ug[idx]
+    for i in adjust_indices:
+        # detach GT so you don’t back-prop into your data
+        uv_new[:, i, :] = gt[:, i, :].detach()
     '''
-    if debug:
-        fig = plt.figure(figsize=figsize, dpi=dpi)
-        ax = fig.add_subplot(1,1,1)
-        #ax.imshow(img)
-        ax.scatter(ug[:,0], ug[:,1], c='g', marker='o', s=markersize, alpha=alpha, label='GT')
-        ax.scatter(up_adj[:,0], up_adj[:,1], c='r', marker='x', s=markersize, alpha=alpha, label='Adjusted Pred')
-        for i, j in skeleton:
-            ax.plot([ug[i,0], ug[j,0]], [ug[i,1], ug[j,1]], c='g', linewidth=1)
-            ax.plot([up_adj[i,0], up_adj[j,0]], [up_adj[i,1], up_adj[j,1]],
-                    c='r', linestyle='--', linewidth=1)
-        ax.axis('off')
-        ax.legend(loc='upper right')
-        plt.tight_layout()
-        plt.show()
-    
+    # reshape back if needed
+    if flat:
+        uv_new = uv_new.view(B, twoK)
 
-    if normalized:
-        up_adj = up_adj / np.array([w,h])[None,:]
-
-    if uv_pred.ndim == 1:
-        up_adj = up_adj.reshape(-1)
-
-    uv_new = torch.from_numpy(up_adj).to(uv_pred.device).type_as(uv_pred)
     return uv_new
 
 class HandNet(nn.Module):
@@ -575,22 +535,10 @@ class HandNet(nn.Module):
         #visualize_uv_keypoints(image[0], uv_pred=uv[0], uv_gt=gt_uv[0])
 
         #-------------
+        #2d injection
         '''
-        adjusted_uv_list = []
-        for i in range(uv.shape[0]):
-            adjusted_np = visualize_uv_keypoints(uv[i], gt_uv[i])
-            adjusted_tensor = torch.from_numpy(adjusted_np).to(uv.device).type_as(uv)
-            adjusted_uv_list.append(adjusted_tensor)
-        uv = torch.stack(adjusted_uv_list, dim=0)
+        uv = uv_inject(uv, gt_uv, adjust_indices=[4,8,12,16,20])
         '''
-
-        for i in range(uv.shape[0]):
-            uv[i] = plot_and_adjust_uv_keypoints(
-                image[i],   # (3,H,W)
-                uv[i],      # your pred
-                gt_uv[i]   # your ground truth
-            )
-
         vertices = self.mesh_head(features, uv)
         #debug predicted vertices
         #visualize_predicted_vertices(vertices[0], save_path='./debug_img/vertices.png')
