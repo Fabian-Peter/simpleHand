@@ -1,34 +1,14 @@
 # Master Thesis HybridHands
 
-As part of my master’s thesis, I used this model to evaluate synthesized hand pose estimation data. The evaluation focused on assessing the quality and effectiveness of the synthetic dataset in training and testing hand pose estimation models.
+This repository is part of the master's thesis "HybridHands". The modified architecture of Zhou et al. is enhanced with two marker injection layers, as seen in the following architecture overview:
 
-# News
 
-**20240916**: 🥇🥇 We won the 1st place, for 2 consecutive years, in Multiview Egocentric Hand Tracking challenge in conjunction with ECCV 2024.🏆🏆 [[Technical Report]](https://arxiv.org/abs/2409.19362)
+![Alt text](images/pipeline_overview.png)
 
-**20240521**: 📢✨ Update checkpoints and train logs in download link. Fix some bugs. 
+For the installation, please refer to the original author's instructions. 
+The dataloader has been adjusted to enable marker injection as described in the data synthesis pipeline [HybridHands](https://github.com/Fabian-Peter/HybridHands).
 
-**20240507**: 📢✨ code released. 
-
-**20240306**: 🔥🔥 Our [project page](https://simplehand.github.io/) is available. 🚀🚀
-
-**20240228**: 🎉📄 Paper accepted by CVPR 2024.📄🎉
-
-**20230930**: 🥇🥇 We won the 1st place in Egocentric 3D Hand Pose Estimation challenge in conjunction with ICCV 2023.🏆🏆 [[Technical Report]](https://arxiv.org/abs/2310.04769)
-
-# simpleHand
-
-**[JIIOV Technology](https://jiiov.com/)**
-
-**A Simple Baseline for Efficient Hand Mesh Reconstruction**
-
-Zhishan Zhou, Shihao Zhou, Zhi Lv, Minqiang Zou, Tong Wu, Mochen Yu, Yao Tang, Jiajun Liang
-
-[[`Paper`]](https://arxiv.org/pdf/2403.01813.pdf) [`[Project]`](#getting-started)
-
-![framework](images/FPS-PA-MPJPE.png)
-
-**A Simple Baseline for Efficient Hand Mesh Reconstruction (simpleHand)** has been accepted by CVPR2024.  This paper ropose a simple yet effective baseline that not only surpasses state-of-the-art (SOTA) methods but also demonstrates computational efficiency. SimpleHand can be easily transplant to mainstream backbones and datasets.
+In case data generation is not an option, you can download the small, pre-generated dataset [MyHAND](https://www.kaggle.com/datasets/fgpeter/myhand).
 
 # Getting Started
 ## Installation
@@ -55,10 +35,9 @@ Then install the rest of the dependencies by
 pip3 install -r requirements.txt
 ```
 
-
 ## Training
 
-Please visit the [FreiHAND project website](https://lmb.informatik.uni-freiburg.de/projects/freihand/) to download FreiHAND data. Then refer to [FreiHAND toolbox](https://github.com/lmb-freiburg/freihand) for MANO model and generate vertices annotations. Name the annotation files to have the same prefix as the corresponding images and put them in a same folder like:
+Please visit the [FreiHAND project website](https://lmb.informatik.uni-freiburg.de/projects/freihand/) to download FreiHAND data [alternatively MyHAND](https://www.kaggle.com/datasets/fgpeter/myhand). Then refer to [FreiHAND toolbox](https://github.com/lmb-freiburg/freihand) for MANO model and generate vertices annotations. Name the annotation files to have the same prefix as the corresponding images and put them in a same folder like:
 ```
 {dataset_dir}
 ├── 00000000.jpg
@@ -78,17 +57,6 @@ dict(
     image_path: string # *.jpg
 )
 ```
-[***RECOMMENDED***] you can alternatively download the pre-generated images and annatations from google drive. This file can be used directly for training and evaluation, without any additional processing. 
-```
-https://drive.google.com/drive/folders/1BfHjNjxQj3MdsGoq5irCrOskyCA9a64l?usp=drive_link
-```
-The folder consists of three train files, train.json, eval.json, FreiHAND.zip. Json files specify image paths. ZIP file consists images and annotations. Validate FreiHAND.zip by
-```
-md5sum FreiHAND.zip
-1d58ff7d6029c8ff724471e06803afa4  FreiHAND.zip
-```
-We release two checkpoints epoch_200_rerun1, epoch_200_rerun2. One can use them for quick comparison or model variance assessment. Also, We provided the out.log, which contains the output from the training process.
-
 Specify the folders in cfg.py. Then you can start training using the following command:
 ```
 make train
@@ -116,3 +84,34 @@ F-scores
 F@5.0mm = 0.0000        F_aligned@5.0mm = 0.7717
 F@15.0mm = 0.0000       F_aligned@15.0mm = 0.9858
 ```
+
+
+# simpleHand
+
+**[JIIOV Technology](https://jiiov.com/)**
+
+**A Simple Baseline for Efficient Hand Mesh Reconstruction**
+
+Zhishan Zhou, Shihao Zhou, Zhi Lv, Minqiang Zou, Tong Wu, Mochen Yu, Yao Tang, Jiajun Liang
+
+[[`Paper`]](https://arxiv.org/pdf/2403.01813.pdf) [`[Project]`](#getting-started)
+
+![framework](images/FPS-PA-MPJPE.png)
+
+**A Simple Baseline for Efficient Hand Mesh Reconstruction (simpleHand)** has been accepted by CVPR2024.  This paper ropose a simple yet effective baseline that not only surpasses state-of-the-art (SOTA) methods but also demonstrates computational efficiency. SimpleHand can be easily transplant to mainstream backbones and datasets.
+
+
+
+
+
+[***RECOMMENDED***] you can alternatively download the pre-generated images and annatations from google drive. This file can be used directly for training and evaluation, without any additional processing. 
+```
+https://drive.google.com/drive/folders/1BfHjNjxQj3MdsGoq5irCrOskyCA9a64l?usp=drive_link
+```
+The folder consists of three train files, train.json, eval.json, FreiHAND.zip. Json files specify image paths. ZIP file consists images and annotations. Validate FreiHAND.zip by
+```
+md5sum FreiHAND.zip
+1d58ff7d6029c8ff724471e06803afa4  FreiHAND.zip
+```
+We release two checkpoints epoch_200_rerun1, epoch_200_rerun2. One can use them for quick comparison or model variance assessment. Also, We provided the out.log, which contains the output from the training process.
+
